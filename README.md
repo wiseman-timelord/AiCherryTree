@@ -2,14 +2,17 @@
 Status: Planning
 
 ### Description:
-Supposedly its possible to modify CherryTree, to generate entire tree documents given source data. Below is some info...
+Supposedly its possible to modify CherryTree, to generate entire tree documents given source data.
 
-
-Yes, while CherryTree itself doesn’t have built-in AI scripting, you can use Python to interact with CherryTree files and integrate AI models like OpenAI’s GPT or local models (Llama) to generate content. CherryTree saves its data in either **SQLite-based** (`.ctb`) or **XML-based** (`.ctz`) formats, which can be accessed and modified programmatically.
+## Notes:
+- Link = https://github.com/giuspen/cherrytree
+- Below is some info...
+```
+Use Python to interact with CherryTree files and integrate AI models like OpenAI’s GPT or local models (Llama) to generate content. CherryTree saves its data in either **SQLite-based** (`.ctb`) or **XML-based** (`.ctz`) formats, which can be accessed and modified programmatically.
 
 Here’s how you can implement AI scripting for CherryTree:
 
----
+
 
 ## **How AI Scripting for CherryTree Works**
 
@@ -27,15 +30,15 @@ Here’s how you can implement AI scripting for CherryTree:
 4. **Export and View in CherryTree**:
    - Once the script modifies the CherryTree file, open it in CherryTree to view the changes.
 
----
+
 
 ## **Step-by-Step Guide to AI Scripting for CherryTree**
 
 ### **Step 1: Install Required Libraries**
 Install Python and the following libraries:
-```bash
+bash
 pip install openai lxml sqlite3
-```
+
 
 ### **Step 2: Generate AI Content**
 Use an AI model to generate text for each node in the tree structure.
@@ -45,7 +48,7 @@ Use an AI model to generate text for each node in the tree structure.
 #### **For `.ctb` (SQLite Database) Files**
 You can directly modify the SQLite database used by CherryTree.
 
-```python
+python
 import sqlite3
 import openai
 
@@ -76,12 +79,12 @@ cursor.execute("""
 conn.commit()
 conn.close()
 print("Node added to CherryTree!")
-```
+
 
 #### **For `.ctz` (XML Files)**
 You can parse and update the XML file using Python.
 
-```python
+python
 from lxml import etree
 import openai
 
@@ -112,9 +115,9 @@ root.append(new_node)
 # Save the updated CherryTree file
 tree.write("updated_example.ctz", pretty_print=True, xml_declaration=True, encoding="UTF-8")
 print("Node added to CherryTree!")
-```
 
----
+
+
 
 ## **Step 4: Automate Tree-Document Creation**
 Expand the script to:
@@ -122,7 +125,7 @@ Expand the script to:
 2. Dynamically generate content for each node.
 
 Example:
-```python
+python
 chapters = [
     {"title": "Chapter 1: Introduction", "sections": ["History of AI", "Modern AI Trends"]},
     {"title": "Chapter 2: Ethics in AI", "sections": ["Bias in AI", "Privacy Concerns"]}
@@ -134,13 +137,12 @@ for chapter in chapters:
     # Add sections under the chapter
     for section in chapter["sections"]:
         section_content = generate_content(f"Write a detailed section about {section}")
-```
 
----
+
+
 
 ## **Benefits of Using AI with CherryTree**
 - **Automation**: No need to manually create and populate nodes.
 - **Scalability**: Easily generate content for large projects like books or technical documentation.
 - **Customization**: Tailor AI prompts to fit your book’s theme and style.
-
-Would you like help setting up a script for your specific project?
+```
