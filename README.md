@@ -1,4 +1,4 @@
-# LightStone
+# LightSt0ne
 Status: Planning
 
 ### Description:
