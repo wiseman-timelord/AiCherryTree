@@ -37,7 +37,7 @@ Oh yes, it's getting serious now...
 
 
 ## Notes
-- Inspired by [CherryTree](https://github.com/giuspen/cherrytree)
+- Inspired by an AI mod idea for [CherryTree](https://github.com/giuspen/cherrytree).
 - Image processing by [ImageMagick](https://imagemagick.org/).
 
 ## Disclaimer:
