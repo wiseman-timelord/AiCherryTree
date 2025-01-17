@@ -10,6 +10,8 @@ A Program that is an AI enhanced Tree Document. The user sets up the primary nod
 - text generation is being done with Llama 3.2 in 3b. I have found this capable of understanding complicated multi-line multi-format text. Cant wait for 3.3 unfiltered to hit. Unfiltered GGUF text generation here `https://huggingface.co/Novaciano/Llama-3.2-3b-NSFW_Aesir_Uncensored-GGUF`, filename `.\models\FluxFusionV2-Q6_K.gguf`.
 - it would also be interesting to get image recognition, as this would enable checking that pictures from the web are actually correct. This will come later possibly. 
 - I need to make also `LightSt0ne-STD`, the non-ai version of LightSt0ne, because I want a viewer/editor without the AI parts, which I logically should have made first. The idea is one can copy the `.\foliage` folder into the install of `LightSt0ne-STD`. `LightSt0ne-STD` should be portable once installed.
+- the sliders for n_ctx and n_batch, are the maximum, we will alter the values relevant to the task. Additionally, a max, n_batch of 4096 and n_ctx of 131072, and only settings, n_batch 2048/4096 and n_ctx 8192/16384/32768/65536/131072, to simplify. If normally task use for example 65536, but max set to for example 32768, then it would use 32768 for the task. 
+- We would read how many characters the input text has, therein, I work out characters from tokens as `(((TOKENS/5)*4)/4)*3=CHARACTERS`, so  we would use the reverse calculation, and see what options it fits within best.   
 
 ### File Structure
 Oh yes, it's getting serious now...
