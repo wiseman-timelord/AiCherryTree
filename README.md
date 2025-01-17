@@ -6,8 +6,8 @@ A Program that is a AI enhanced Tree Document. The Ai is instructed through chat
 
 ## Development
 - It will be designed to work on Windows ONLY. This is because Paint Shop Pro 9 is for windows; ALL other paint programs are not so good for quick editing of LOTS of images, and windows XP-10 compatible to boot.
-- It would be nice to have both image generation. Image generation would remove requirement for image editing, to the users discretion of later replacement. [Flux v2 NSFW GGUF](https://huggingface.co/Anibaaal/Flux-Fusion-V2-4step-merge-gguf-nf4) is available and able to complete in 4 steps. 
-- It would be nice to have both image recognition, one could point it to a resource of images and state "make best use of the images in my tree".
+- It would be nice to have both image generation. Image generation would remove requirement for image editing, to the users discretion of later replacement. [Flux v2 NSFW GGUF](https://huggingface.co/Anibaaal/Flux-Fusion-V2-4step-merge-gguf-nf4) is available and able to complete in 4 steps. Images would have to be, 200x200 for a scene or 100x200 for a person or 100x100 for an item, in pixels. I have found these sizes are optimal for LARGE tree documents. Somehow the text based model would have to be used to determine what the type is, that will then be used in the arguments sent with the prompt to the image model. Unfiltered GGUF image generation here `https://huggingface.co/Anibaaal/Flux-Fusion-V2-4step-merge-gguf-nf4`, filename `Llama-3.2-3b-NSFW_Aesir_Uncensored.gguf`, intended path `.\models\Llama-3.2-3b-NSFW_Aesir_Uncensored.gguf`
+- text generation is being done with Llama 3.2 in 3b. I have found this capable of understanding complicated multi-line multi-format text. Cant wait for 3.3 unfiltered to hit. Unfiltered GGUF text generation here `https://huggingface.co/Novaciano/Llama-3.2-3b-NSFW_Aesir_Uncensored-GGUF`, filename `.\models\FluxFusionV2-Q6_K.gguf`.
 
 ### File Structure
 Oh yes, it's getting serious now...
