@@ -34,3 +34,6 @@ Oh yes, it's getting serious now...
 │   └── images
 └── temp
 ```
+
+## Notes:
+- Wiseman-Timelord does not, concent towards or agree with, any given documents created by this program, for users that are not relevant to be the creator Wiseman-Timelord himself. 
