@@ -29,11 +29,11 @@ Oh yes, it's getting serious now...
 │   ├── internet.ps1  # the functions for web research, scraping.
 │   ├── prompts.ps1  # the functions for web research, scraping.
 │   ├── nodes.ps1  # the functions for node management.
-├── data
+├── data  # Mostly, downloaded from internet or created by `installer.ps1` 
 │   ├── temporary.ps1  # location of ALL, globals, maps, lists, constants.
 │   ├── persistent.psd1  # persistent settings able to be configured in interface, as well as other critical persistent information.
 │   └── cudart-llama-bin-win-cu11.7  # contents of cudart-llama-bin-win-cu11.7-x64.zip
-│   └── backup.ls0  # the last good version of the tree document upon loading, as a fallback for corrupt load file
+│   └── backup.ls0  # the last good version of the tree document upon loading, as a fallback for corrupt load file (created by main program not installer) 
 │   └── default.ls0  # the default tree file, with critical information on using the program and its features. This is copied to `.\foliage\tree.ls0` upon first run.
 │   └── ImageMagick  # folder for installed ImageMagick files.
 ├── foliage
