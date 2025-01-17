@@ -6,7 +6,6 @@ A Program that is a AI enhanced Tree Document. The Ai is instructed through chat
 
 ## Development
 - It will be designed to work on Windows ONLY. This is the case because Paint Shop Pro 9 is made for windows; ALL other paint programs I have ever tried are not so good for quick editing of images, and it stil works with up to windows 10 from my own experience.
-- Avalonia UI for multi-platform interfaces.
 - It would be nice to have both image recognition and generation. with image recognition, you could point it to a resource of images and state "make best use of the images in my tree". Image generation would remove requirement for image editing, but still the user is able to replace images if they dont completely approve of the given generated image.
 
 ### File Structure
@@ -39,6 +38,6 @@ Oh yes, it's getting serious now...
 ## Notes
 - Inspired by an AI mod idea for [CherryTree](https://github.com/giuspen/cherrytree).
 - Image processing by [ImageMagick](https://imagemagick.org/).
-
+- Multi-platform interfaces by [Avalonia UI](https://avaloniaui.net/).
 ## Disclaimer:
 - Wiseman-Timelord does not consent to, authorize, or empower any documents created by others using this program. Only the creators of those documents, who are not Wiseman-Timelord, hold responsibility and authority over them.
