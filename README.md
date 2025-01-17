@@ -28,6 +28,7 @@ Oh yes, it's getting serious now...
 │   ├── images.ps1  # the handling and prompting of image model, as well as filtering input.
 │   ├── internet.ps1  # the functions for web research, scraping.
 │   ├── prompts.ps1  # the functions for web research, scraping.
+│   ├── nodes.ps1  # the functions for node management.
 ├── data
 │   ├── temporary.ps1  # location of ALL, globals, maps, lists, constants.
 │   ├── persistent.psd1  # persistent settings able to be configured in interface, as well as other critical persistent information.
