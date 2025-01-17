@@ -1,4 +1,4 @@
-# LightSt0ne
+# ![LightSt0ne](https://github.com/wiseman-timelord/LightSt0ne/blob/main/media/lightstone.png)
 Status: Planning
 
 ### Description:
