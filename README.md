@@ -20,8 +20,9 @@ Oh yes, it's getting serious now...
 ├── scripts
 │   ├── interface.ps1  # ALL interface code for `Avalonia UI` and any menus.
 │   ├── utility.ps1  # the functions that dont fit better elsewhere. This should also contain `impexppsd1`.
-│   ├── model.ps1  # the handling and prompting of models, as well as filtering input/output.
+│   ├── models.ps1  # the handling and prompting of models, as well as filtering input/output.
 │   ├── internet.ps1  # the functions for web research, scraping.
+│   ├── prompts.ps1  # the functions for web research, scraping.
 ├── data
 │   ├── temporary.ps1  # location of ALL, globals, maps, lists, constants.
 │   ├── persistent.psd1  # persistent settings able to be configured in interface, as well as other critical persistent information.
