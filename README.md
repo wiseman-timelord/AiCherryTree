@@ -38,6 +38,7 @@ Oh yes, it's getting serious now...
 
 ## Notes
 - Inspired by [CherryTree](https://github.com/giuspen/cherrytree)
+- Image processing by [ImageMagick](https://imagemagick.org/).
 
 ## Disclaimer:
 - Wiseman-Timelord does not consent to, authorize, or empower any documents created by others using this program. Only the creators of those documents, who are not Wiseman-Timelord, hold responsibility and authority over them.
