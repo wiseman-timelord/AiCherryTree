@@ -6,7 +6,8 @@ A Program that is a AI enhanced Tree Document. The Ai is instructed through chat
 
 ## Development
 - It will be designed to work on Windows ONLY. This is because Paint Shop Pro 9 is for windows; ALL other paint programs are not so good for quick editing of LOTS of images, and windows XP-10 compatible to boot.
-- It would be nice to have both image recognition and generation. with image recognition, you could point it to a resource of images and state "make best use of the images in my tree". Image generation would remove requirement for image editing, but still the user is able to replace images if they dont completely approve of the given generated image.
+- It would be nice to have both image generation. Image generation would remove requirement for image editing, to the users discretion of later replacement. [Flux v2 NSFW GGUF](https://huggingface.co/Anibaaal/Flux-Fusion-V2-4step-merge-gguf-nf4) is available and able to complete in 4 steps. 
+- It would be nice to have both image recognition, one could point it to a resource of images and state "make best use of the images in my tree".
 
 ### File Structure
 Oh yes, it's getting serious now...
