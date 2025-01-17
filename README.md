@@ -36,4 +36,4 @@ Oh yes, it's getting serious now...
 ```
 
 ## Disclaimer:
-- Wiseman-Timelord does not, concent towards or agree with, any given documents created by this program by users that are not relevant to be the creator Wiseman-Timelord himself. 
+Wiseman-Timelord does not consent to, authorize, or empower any documents created by others using this program. Only the creators of those documents, who are not Wiseman-Timelord, hold responsibility and authority over them.
