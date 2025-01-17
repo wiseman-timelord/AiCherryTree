@@ -2,7 +2,7 @@
 Status: Planning
 
 ### Description:
-A Program that is a AI enhanced Tree Document. The Ai is instructed through chat part of interface, then the AI will be able to manage nodes and fill out nodes with appropriate data, furthermore, the user will be able to tell it to research on the internet. The User is also able to manage and edit nodes. Program Loads on Open and Saves on Close. Ai will be generating text and the user will be doing the image editing. I am making this program for me, its better it just designed to run on my things, hence, I am not making it with install options, its `Cuda 11.8` ONLY, though I am sure it could easily be adapted, with a little edit of the installer, and im also sure if £500-1000 appeared in my bank, it would soon be made for cuda 12.
+A Program that is an AI enhanced Tree Document. The user sets up the primary nods, some kind of basic structure, and possibly details some of the nodes, then the Ai is instructed through chat part of interface, what branches to expand upon and how, then the AI will be able to plan, then manage nodes, produce research, obtain materials, generate images/text, and fill out new nodes, and then the user will be able to inspect the relevant nodes, and further edit them, or instruct the AI to do so, or work on other stuff, etc. There is obviously the tree document editor, then the idea is the user will slide the proportions of the display between sides of, tree or ai chat, or something. Program Loads Tree on Open and Saves Tree on Close, and some kind of configurable autosave by default every 15 minutes.
 
 ## Development
 - Now using llama-box `https://github.com/gpustack/llama-box/releases/download/v0.0.107/llama-box-windows-amd64-cuda-11.8.zip`, instead of llama.cpp 
@@ -45,6 +45,7 @@ Oh yes, it's getting serious now...
 1. run `LightSt0ne.bat`.
 
 ## Notes
+- Making this program, for me and to be streamlined, its better it optimized to run on my things, hence, no install options, its `Cuda 11.8` ONLY, but I would make it for `cuda 12` if I had such a card.
 - Windows ONLY, Paint Shop Pro 9 is for windows; ALL other paint progs not so good for quick arangement/editing of 100s of images.
 - Inspired by an AI mod idea for [CherryTree](https://github.com/giuspen/cherrytree).
 - Image processing by [ImageMagick](https://imagemagick.org/).
