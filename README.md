@@ -2,7 +2,7 @@
 Status: Planning
 
 ### Description:
-A Program that is a AI enhanced Tree Document. The Ai is instructed through chat part of interface, then the AI will be able to manage nodes and fill out nodes with appropriate data, furthermore, the user will be able to tell it to research on the internet. The User is also able to manage and edit nodes. Program Loads on Open and Saves on Close. Ai will be generating text and the user will be doing the image editing. I am making this program for me, its better it just designed to run on my things, hence, I am not making it with install options, its `Cuda 11.8` ONLY, though I am sure it could easily be adapted, with a little edit of the installer etc.
+A Program that is a AI enhanced Tree Document. The Ai is instructed through chat part of interface, then the AI will be able to manage nodes and fill out nodes with appropriate data, furthermore, the user will be able to tell it to research on the internet. The User is also able to manage and edit nodes. Program Loads on Open and Saves on Close. Ai will be generating text and the user will be doing the image editing. I am making this program for me, its better it just designed to run on my things, hence, I am not making it with install options, its `Cuda 11.8` ONLY, though I am sure it could easily be adapted, with a little edit of the installer, and im also sure if £500-1000 appeared in my bank, it would soon be made for cuda 12.
 
 ## Development
 - Now using llama-box `https://github.com/gpustack/llama-box/releases/download/v0.0.107/llama-box-windows-amd64-cuda-11.8.zip`
