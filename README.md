@@ -19,7 +19,8 @@ Oh yes, it's getting serious now...
 ├── scripts
 │   ├── interface.ps1  # ALL interface code for `Avalonia UI` and any menus.
 │   ├── utility.ps1  # the functions that dont fit better elsewhere. This should also contain `impexppsd1`.
-│   ├── models.ps1  # the handling and prompting of models, as well as filtering input/output.
+│   ├── texts.ps1  # the handling and prompting of text based model, as well as filtering input/output.
+│   ├── images.ps1  # the handling and prompting of image model, as well as filtering input.
 │   ├── internet.ps1  # the functions for web research, scraping.
 │   ├── prompts.ps1  # the functions for web research, scraping.
 ├── data
