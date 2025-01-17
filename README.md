@@ -5,7 +5,7 @@ Status: Planning
 A Program that is a AI enhanced Tree Document. The Ai is instructed through chat part of interface, then the AI will be able to manage nodes and fill out nodes with appropriate data, furthermore, the user will be able to tell it to research on the internet. The User is also able to manage and edit nodes. Program Loads on Open and Saves on Close. Ai will be generating text and the user will be doing the image editing. First priority is, stable with working tree document interface. I get that most of you will not understand the significance of this program or its purposes, but if you do, then support me, support me and support me some more, albeit let me move in to a new home and put my feet on your furniture.
 
 ## Development
-- It will be designed to work on Windows ONLY. This is the case because Paint Shop Pro 9 is made for windows; ALL other paint programs I have ever tried are not so good for quick editing of images, and it stil works with up to windows 10 from my own experience.
+- It will be designed to work on Windows ONLY. This is because Paint Shop Pro 9 is for windows; ALL other paint programs are not so good for quick editing of LOTS of images, and windows XP-10 compatible to boot.
 - It would be nice to have both image recognition and generation. with image recognition, you could point it to a resource of images and state "make best use of the images in my tree". Image generation would remove requirement for image editing, but still the user is able to replace images if they dont completely approve of the given generated image.
 
 ### File Structure
