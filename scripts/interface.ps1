@@ -484,22 +484,28 @@ class MainWindow : Avalonia.Controls.Window {
         Show-StatusMessage "Settings dialog not implemented" "Warning"
     }
     
-    [void]SendChatMessage($message) {
-        if (-not [string]::IsNullOrWhiteSpace($message)) {
-            $this.ChatOutput.Text += "You: $message`n"
-            
-            # Show typing indicator
-            $this.ChatOutput.Text += "AI is typing...`n"
-            $this.ChatOutput.CaretIndex = $this.ChatOutput.Text.Length
-            
-            # Process message
-            $response = Send-ContextualPrompt -Prompt $message
-            
-            # Remove typing indicator and show response
-            $this.ChatOutput.Text = $this.ChatOutput.Text.Replace("AI is typing...`n", "")
-            $this.ChatOutput.Text += "AI: $response`n`n"
-            $this.ChatOutput.CaretIndex = $this.ChatOutput.Text.Length
-        }
+	[void]ShowSettings() {
+			$settingsDialog = [SettingsDialog]::new()
+			$settingsDialog.ShowDialog($this)
+			
+			# Apply UI updates based on new settings
+			$settings = Get-Settings
+			if ($settings.Theme -eq "Dark") {
+				$this.Background = [Avalonia.Media.Brushes]::Black
+				$this.Foreground = [Avalonia.Media.Brushes]::White
+			}
+			else {
+				$this.Background = [Avalonia.Media.Brushes]::White
+				$this.Foreground = [Avalonia.Media.Brushes]::Black
+			}
+			
+			# Update auto-save timer if changed
+			if ($this.AutoSaveTimer) {
+				$this.AutoSaveTimer.Interval = $settings.AutoSaveInterval * 1000
+			}
+			
+			Show-StatusMessage "Settings updated" "Success"
+		}
     }
 }
 
@@ -643,6 +649,8 @@ function Start-LightStoneInterface {
         return $false
     }
 }
+
+
 
 # Export functions
 Export-ModuleMember -Function *

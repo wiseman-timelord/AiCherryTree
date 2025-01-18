@@ -1,4 +1,5 @@
-# .\scripts\utility.ps1
+# Core utilities and settings management
+# utility.ps1
 
 using namespace System.Security.Cryptography
 using namespace System.IO
@@ -6,9 +7,232 @@ using namespace System.IO
 # Import required modules
 Add-Type -AssemblyName System.Drawing
 
-# Core utility functions
+# Settings Management
+$script:SettingsCache = $null
+$script:SettingsSchema = @{
+    # System Settings
+    AutoBackup = @{
+        Type = "bool"
+        Default = $true
+        Validate = { param($value) $value -is [bool] }
+        Description = "Enable automatic backup of tree files"
+    }
+    BackupInterval = @{
+        Type = "int"
+        Default = 300
+        Validate = { param($value) $value -is [int] -and $value -ge 60 -and $value -le 3600 }
+        Description = "Backup interval in seconds (60-3600)"
+    }
+    
+    # UI Settings
+    Theme = @{
+        Type = "string"
+        Default = "Light"
+        Validate = { param($value) $value -in @("Light", "Dark") }
+        Description = "UI theme (Light/Dark)"
+    }
+    Language = @{
+        Type = "string"
+        Default = "English"
+        Validate = { param($value) $value -in @("English", "Spanish", "French", "German") }
+        Description = "Interface language"
+    }
+    
+    # File Settings
+    ImageFormat = @{
+        Type = "string"
+        Default = "jpg"
+        Validate = { param($value) $value -in @("jpg", "png") }
+        Description = "Default image format for saving"
+    }
+    HashLength = @{
+        Type = "int"
+        Default = 8
+        Validate = { param($value) $value -in @(8, 16, 32) }
+        Description = "Length of hash for file names"
+    }
+    
+    # Image Settings
+    MaxImageSize = @{
+        Type = "int"
+        Default = 1920
+        Validate = { param($value) $value -in @(1280, 1920, 2560, 3840) }
+        Description = "Maximum image dimension in pixels"
+    }
+    ImageQuality = @{
+        Type = "int"
+        Default = 95
+        Validate = { param($value) $value -ge 70 -and $value -le 100 }
+        Description = "JPEG quality (70-100)"
+    }
+    
+    # Model Settings
+    MaxContextSize = @{
+        Type = "int"
+        Default = 32768
+        Validate = { param($value) $value -in @(8192, 16384, 32768, 65536, 131072) }
+        Description = "Maximum context size for AI models"
+    }
+    MaxBatchSize = @{
+        Type = "int"
+        Default = 2048
+        Validate = { param($value) $value -in @(2048, 4096) }
+        Description = "Maximum batch size for AI models"
+    }
+    
+    # Auto-save Settings
+    AutoSaveInterval = @{
+        Type = "int"
+        Default = 300
+        Validate = { param($value) $value -ge 60 -and $value -le 3600 }
+        Description = "Auto-save interval in seconds (60-3600)"
+    }
+    MaxUndoStates = @{
+        Type = "int"
+        Default = 50
+        Validate = { param($value) $value -ge 10 -and $value -le 100 }
+        Description = "Maximum number of undo states (10-100)"
+    }
+}
+
+# Settings Functions
+function Get-Settings {
+    if ($null -eq $script:SettingsCache) {
+        $settingsPath = ".\data\persistent.psd1"
+        try {
+            if (Test-Path $settingsPath) {
+                $settings = Import-PowerShellDataFile $settingsPath
+                # Validate and apply defaults for missing settings
+                foreach ($key in $script:SettingsSchema.Keys) {
+                    if (-not $settings.ContainsKey($key)) {
+                        $settings[$key] = $script:SettingsSchema[$key].Default
+                    }
+                    elseif (-not (& $script:SettingsSchema[$key].Validate $settings[$key])) {
+                        Write-Warning "Invalid setting for $key, using default"
+                        $settings[$key] = $script:SettingsSchema[$key].Default
+                    }
+                }
+            }
+            else {
+                # Create default settings
+                $settings = @{}
+                foreach ($key in $script:SettingsSchema.Keys) {
+                    $settings[$key] = $script:SettingsSchema[$key].Default
+                }
+            }
+            $script:SettingsCache = $settings
+        }
+        catch {
+            Write-Error "Failed to load settings: $_"
+            # Return defaults if loading fails
+            $settings = @{}
+            foreach ($key in $script:SettingsSchema.Keys) {
+                $settings[$key] = $script:SettingsSchema[$key].Default
+            }
+            $script:SettingsCache = $settings
+        }
+    }
+    return $script:SettingsCache
+}
+
+function Set-Settings {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Settings
+    )
+    
+    $currentSettings = Get-Settings
+    $settingsPath = ".\data\persistent.psd1"
+    $backupPath = ".\data\persistent.psd1.bak"
+    
+    try {
+        # Validate new settings
+        foreach ($key in $Settings.Keys) {
+            if (-not $script:SettingsSchema.ContainsKey($key)) {
+                throw "Invalid setting key: $key"
+            }
+            if (-not (& $script:SettingsSchema[$key].Validate $Settings[$key])) {
+                throw "Invalid value for setting $key"
+            }
+        }
+        
+        # Backup current settings
+        if (Test-Path $settingsPath) {
+            Copy-Item $settingsPath $backupPath -Force
+        }
+        
+        # Update settings
+        foreach ($key in $Settings.Keys) {
+            $currentSettings[$key] = $Settings[$key]
+        }
+        
+        # Save to file
+        $content = "@{`n"
+        foreach ($key in $currentSettings.Keys | Sort-Object) {
+            $value = $currentSettings[$key]
+            if ($value -is [string]) {
+                $value = "'$value'"
+            }
+            elseif ($value -is [bool]) {
+                $value = if ($value) { '$true' } else { '$false' }
+            }
+            $content += "    $key = $value`n"
+        }
+        $content += "}"
+        
+        Set-Content -Path $settingsPath -Value $content -Force
+        $script:SettingsCache = $currentSettings
+        
+        # Remove backup if successful
+        if (Test-Path $backupPath) {
+            Remove-Item $backupPath
+        }
+        
+        return $true
+    }
+    catch {
+        Write-Error "Failed to save settings: $_"
+        # Restore from backup
+        if (Test-Path $backupPath) {
+            Copy-Item $backupPath $settingsPath -Force
+            Remove-Item $backupPath
+        }
+        return $false
+    }
+}
+
+function Reset-Settings {
+    param(
+        [Parameter(Mandatory = $false)]
+        [string[]]$Keys
+    )
+    
+    $currentSettings = Get-Settings
+    $defaults = @{}
+    
+    if ($Keys) {
+        foreach ($key in $Keys) {
+            if ($script:SettingsSchema.ContainsKey($key)) {
+                $defaults[$key] = $script:SettingsSchema[$key].Default
+            }
+        }
+    }
+    else {
+        foreach ($key in $script:SettingsSchema.Keys) {
+            $defaults[$key] = $script:SettingsSchema[$key].Default
+        }
+    }
+    
+    return (Set-Settings -Settings $defaults)
+}
+
+function Get-SettingsSchema {
+    return $script:SettingsSchema
+}
+
+# File Operations
 function Get-RandomHash {
-    param([int]$Length = 8)
+    param([int]$Length = (Get-Settings).HashLength)
     $bytes = [byte[]]::new([Math]::Ceiling($Length / 2))
     $rng = [RNGCryptoServiceProvider]::new()
     $rng.GetBytes($bytes)
@@ -21,20 +245,25 @@ function Test-FileHash {
         [string]$ExpectedHash
     )
     $actualHash = Get-FileHash -Path $FilePath -Algorithm SHA256
-    return $actualHash.Hash.Substring(0, 8).ToLower() -eq $ExpectedHash.ToLower()
+    return $actualHash.Hash.Substring(0, (Get-Settings).HashLength).ToLower() -eq $ExpectedHash.ToLower()
 }
 
-# Image processing
+# Image Processing
 function Optimize-Image {
     param(
         [Parameter(Mandatory = $true)]
         [string]$InputPath,
         [string]$OutputPath,
-        [int]$MaxWidth = $global:CONSTANTS.MaxImageSize,
-        [int]$Quality = $global:CONSTANTS.ImageQuality
+        [int]$MaxWidth = $null,
+        [int]$Quality = $null
     )
     
     try {
+        # Get settings
+        $settings = Get-Settings
+        $maxWidth = $MaxWidth ?? $settings.MaxImageSize
+        $quality = $Quality ?? $settings.ImageQuality
+        
         # Ensure ImageMagick is in path
         $magickPath = ".\data\ImageMagick\magick.exe"
         if (-not (Test-Path $magickPath)) {
@@ -44,15 +273,15 @@ function Optimize-Image {
         # Generate output path if not provided
         if (-not $OutputPath) {
             $hash = Get-RandomHash
-            $OutputPath = Join-Path $global:PATHS.ImagesDir "$hash.jpg"
+            $OutputPath = Join-Path $global:PATHS.ImagesDir "$hash.$($settings.ImageFormat)"
         }
 
         # Process image
         $args = @(
             $InputPath,
             "-auto-orient",
-            "-resize", "${MaxWidth}x${MaxWidth}>",
-            "-quality", "$Quality",
+            "-resize", "${maxWidth}x${maxWidth}>",
+            "-quality", "$quality",
             "-strip",
             $OutputPath
         )
@@ -70,110 +299,7 @@ function Optimize-Image {
     }
 }
 
-# Tree management
-function New-TreeNode {
-    param(
-        [string]$Title,
-        [string]$Content = "",
-        [string]$ParentId = "root",
-        [array]$Children = @(),
-        [hashtable]$Metadata = @{}
-    )
-    
-    $nodeId = Get-RandomHash
-    
-    return @{
-        Id = $nodeId
-        Title = $Title
-        Content = $Content
-        ParentId = $ParentId
-        Children = $Children
-        Created = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-        Modified = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-        Metadata = $Metadata
-    }
-}
-
-function Save-TreeNode {
-    param(
-        [Parameter(Mandatory = $true)]
-        [hashtable]$Node,
-        [bool]$CreateBackup = $true
-    )
-    
-    try {
-        # Save content to text file if present
-        if ($Node.Content) {
-            $textHash = Get-RandomHash
-            $textPath = Join-Path $global:PATHS.TextsDir "$textHash.txt"
-            Set-Content -Path $textPath -Value $Node.Content -Force
-            $Node.TextHash = $textHash
-            $Node.Content = $null  # Don't store content in tree
-        }
-
-        # Update tree
-        $tree = Get-TreeData
-        $updated = Update-TreeNodeRecursive $tree.root $Node
-        if (-not $updated) {
-            throw "Failed to update node"
-        }
-
-        # Save tree
-        $treeJson = $tree | ConvertTo-Json -Depth 10
-        Set-Content -Path $global:PATHS.TreeFile -Value $treeJson -Force
-
-        # Create backup if requested
-        if ($CreateBackup) {
-            Copy-Item $global:PATHS.TreeFile $global:PATHS.BackupFile -Force
-        }
-
-        return $true
-    }
-    catch {
-        Write-Error "Failed to save tree node: $_"
-        return $false
-    }
-}
-
-function Update-TreeNodeRecursive {
-    param(
-        [Parameter(Mandatory = $true)]
-        [object]$CurrentNode,
-        [Parameter(Mandatory = $true)]
-        [hashtable]$UpdateNode
-    )
-    
-    if ($CurrentNode.Id -eq $UpdateNode.Id) {
-        # Update properties
-        foreach ($key in $UpdateNode.Keys) {
-            $CurrentNode.$key = $UpdateNode.$key
-        }
-        return $true
-    }
-    
-    foreach ($child in $CurrentNode.Children) {
-        if (Update-TreeNodeRecursive $child $UpdateNode) {
-            return $true
-        }
-    }
-    
-    return $false
-}
-
-function Get-TreeNodeContent {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$TextHash
-    )
-    
-    $textPath = Join-Path $global:PATHS.TextsDir "$TextHash.txt"
-    if (Test-Path $textPath) {
-        return Get-Content -Path $textPath -Raw
-    }
-    return $null
-}
-
-# Import/Export functions from previous impexppsd1.ps1
+# Data Import/Export
 function Import-PowerShellData1 {
     param([string]$Path)
     $content = Get-Content -Path $Path -Raw
@@ -189,7 +315,7 @@ function Export-PowerShellData1 {
         [string]$Path
     )
     $content = "@{`n"
-    foreach ($key in $Data.Keys) {
+    foreach ($key in $Data.Keys | Sort-Object) {
         $value = $Data[$key]
         $content += "    $key = $(ConvertTo-Psd1String $value)`n"
     }
@@ -197,248 +323,25 @@ function Export-PowerShellData1 {
     Set-Content -Path $Path -Value $content
 }
 
-# Advanced Tree Operations
-function Move-TreeNode {
-    param(
-        [string]$NodeId,
-        [string]$NewParentId,
-        [int]$Position = -1  # -1 means append
-    )
-    try {
-        $tree = Get-TreeData
-        $node = Find-TreeNode -Tree $tree -NodeId $NodeId
-        $oldParent = Find-TreeNode -Tree $tree -NodeId $node.ParentId
-        $newParent = Find-TreeNode -Tree $tree -NodeId $NewParentId
-
-        # Remove from old parent
-        $oldParent.Children = $oldParent.Children | Where-Object { $_.Id -ne $NodeId }
-
-        # Add to new parent
-        $node.ParentId = $NewParentId
-        if ($Position -eq -1 -or $Position -ge $newParent.Children.Count) {
-            $newParent.Children += $node
-        } else {
-            $newParent.Children = @(
-                $newParent.Children[0..($Position-1)]
-                $node
-                $newParent.Children[$Position..($newParent.Children.Count-1)]
-            )
-        }
-
-        Save-TreeData -Tree $tree
-        return $true
+# Helper Functions
+function ConvertTo-Psd1String {
+    param($Value)
+    if ($Value -is [string]) {
+        return "'$Value'"
     }
-    catch {
-        Write-Error "Failed to move node: $_"
-        return $false
+    elseif ($Value -is [bool]) {
+        return if ($Value) { '$true' } else { '$false' }
+    }
+    elseif ($Value -is [array] -or $Value -is [System.Collections.ArrayList]) {
+        return "@(" + ($Value -join ",") + ")"
+    }
+    elseif ($Value -is [hashtable]) {
+        return "@{" + (($Value.GetEnumerator() | ForEach-Object { "$($_.Key)=$(ConvertTo-Psd1String $_.Value)" }) -join ";") + "}"
+    }
+    else {
+        return $Value
     }
 }
 
-function Copy-TreeNode {
-    param(
-        [string]$NodeId,
-        [string]$NewParentId,
-        [bool]$Recursive = $true
-    )
-    try {
-        $tree = Get-TreeData
-        $sourceNode = Find-TreeNode -Tree $tree -NodeId $NodeId
-        $targetParent = Find-TreeNode -Tree $tree -NodeId $NewParentId
-
-        # Create copy of node
-        $newNode = @{
-            Id = Get-RandomHash
-            Title = "$($sourceNode.Title) (Copy)"
-            ParentId = $NewParentId
-            Created = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-            Modified = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-            Children = @()
-        }
-
-        # Copy content if exists
-        if ($sourceNode.TextHash) {
-            $content = Get-TreeNodeContent -TextHash $sourceNode.TextHash
-            $newNode.TextHash = New-TextNode -Content $content -Title $newNode.Title
-        }
-
-        # Copy children recursively if requested
-        if ($Recursive -and $sourceNode.Children) {
-            foreach ($child in $sourceNode.Children) {
-                Copy-TreeNode -NodeId $child.Id -NewParentId $newNode.Id -Recursive $true
-            }
-        }
-
-        $targetParent.Children += $newNode
-        Save-TreeData -Tree $tree
-        return $newNode.Id
-    }
-    catch {
-        Write-Error "Failed to copy node: $_"
-        return $null
-    }
-}
-
-function Merge-TreeNodes {
-    param(
-        [string[]]$NodeIds,
-        [string]$NewTitle
-    )
-    try {
-        $tree = Get-TreeData
-        $nodes = $NodeIds | ForEach-Object { Find-TreeNode -Tree $tree -NodeId $_ }
-        
-        # Create merged content
-        $mergedContent = @()
-        foreach ($node in $nodes) {
-            if ($node.TextHash) {
-                $content = Get-TreeNodeContent -TextHash $node.TextHash
-                $mergedContent += "=== $($node.Title) ===`n$content`n`n"
-            }
-        }
-
-        # Create new node
-        $newNode = @{
-            Id = Get-RandomHash
-            Title = $NewTitle
-            ParentId = $nodes[0].ParentId
-            Created = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-            Modified = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-            Children = @()
-        }
-
-        # Save merged content
-        if ($mergedContent) {
-            $newNode.TextHash = New-TextNode -Content ($mergedContent -join "`n") -Title $NewTitle
-        }
-
-        # Move all children to new node
-        foreach ($node in $nodes) {
-            $newNode.Children += $node.Children
-            foreach ($child in $node.Children) {
-                $child.ParentId = $newNode.Id
-            }
-        }
-
-        # Remove old nodes
-        $parent = Find-TreeNode -Tree $tree -NodeId $nodes[0].ParentId
-        $parent.Children = @($parent.Children | Where-Object { $_.Id -notin $NodeIds })
-        $parent.Children += $newNode
-
-        Save-TreeData -Tree $tree
-        return $newNode.Id
-    }
-    catch {
-        Write-Error "Failed to merge nodes: $_"
-        return $null
-    }
-}
-
-# Node History Management
-function Add-NodeHistory {
-    param(
-        [string]$NodeId,
-        [string]$Action,
-        [hashtable]$Changes
-    )
-    try {
-        $historyPath = ".\data\history.psd1"
-        $history = if (Test-Path $historyPath) {
-            Import-PowerShellData1 -Path $historyPath
-        } else {
-            @{}
-        }
-
-        if (-not $history[$NodeId]) {
-            $history[$NodeId] = @()
-        }
-
-        $history[$NodeId] += @{
-            Timestamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-            Action = $Action
-            Changes = $Changes
-        }
-
-        Export-PowerShellData1 -Data $history -Path $historyPath
-        return $true
-    }
-    catch {
-        Write-Error "Failed to add history: $_"
-        return $false
-    }
-}
-
-function Get-NodeHistory {
-    param([string]$NodeId)
-    try {
-        $historyPath = ".\data\history.psd1"
-        if (Test-Path $historyPath) {
-            $history = Import-PowerShellData1 -Path $historyPath
-            return $history[$NodeId]
-        }
-        return @()
-    }
-    catch {
-        Write-Error "Failed to get history: $_"
-        return @()
-    }
-}
-
-# Tree Validation
-function Test-TreeStructure {
-    param([hashtable]$Tree)
-    try {
-        # Validate root
-        if (-not $Tree.root) {
-            throw "Missing root node"
-        }
-
-        # Track all node IDs
-        $nodeIds = @{}
-        $parentIds = @{}
-
-        function Validate-Node {
-            param($Node, $ParentId)
-            
-            # Check required properties
-            if (-not $Node.Id -or -not $Node.Title) {
-                throw "Node missing required properties"
-            }
-
-            # Check for duplicate IDs
-            if ($nodeIds[$Node.Id]) {
-                throw "Duplicate node ID: $($Node.Id)"
-            }
-            $nodeIds[$Node.Id] = $true
-
-            # Track parent relationship
-            if ($ParentId) {
-                $parentIds[$Node.Id] = $ParentId
-            }
-
-            # Validate children
-            if ($Node.Children) {
-                foreach ($child in $Node.Children) {
-                    Validate-Node -Node $child -ParentId $Node.Id
-                }
-            }
-        }
-
-        Validate-Node -Node $Tree.root
-
-        # Validate parent references
-        foreach ($nodeId in $nodeIds.Keys) {
-            if ($nodeId -ne "root" -and -not $parentIds[$nodeId]) {
-                throw "Orphaned node found: $nodeId"
-            }
-        }
-
-        return $true
-    }
-    catch {
-        Write-Error "Tree validation failed: $_"
-        return $false
-    }
-}
-
-# Export all functions
+# Export functions
 Export-ModuleMember -Function *
