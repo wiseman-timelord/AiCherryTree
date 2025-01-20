@@ -22,7 +22,8 @@ Oh yes, it's getting serious now...
 ├── installer.ps1  # Standalone script, separate from program - install the program and its requirements. 
 ├── launcher.ps1  # launch the program, entry point for other scripts.
 ├── scripts
-│   ├── interface.ps1  # ALL interface code for `Avalonia UI` and any menus.
+│   ├── interface.ps1  # interface code for `Avalonia UI` and any menus.
+│   ├── interface.xaml  # more interface code in a more efficient format (code reduction 80%).
 │   ├── utility.ps1  # the functions that dont fit better elsewhere. This should also contain `impexppsd1`.
 │   ├── texts.ps1  # the handling and prompting of text based model, as well as filtering input/output.
 │   ├── images.ps1  # the handling and prompting of image model, as well as filtering input.
