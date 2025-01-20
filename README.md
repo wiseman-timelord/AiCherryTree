@@ -92,4 +92,4 @@ With the addition of a **personal organizer** functionality (even if implemented
 ```
 
 ## Disclaimer:
-- Wiseman-Timelord does not consent to, authorize, or empower any documents created by others using this program. Only the creators of those documents, who are not Wiseman-Timelord, hold responsibility and authority over them.
+- Wiseman-Timelord does not consent to, authorize and/or empower any given documents created by other individuals using LightSt0ne, nay, for other individuals, authorise and empowere, their own works, for whatever, authority and powers, they have.
