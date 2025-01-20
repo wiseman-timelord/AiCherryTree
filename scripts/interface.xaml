@@ -1,0 +1,115 @@
+# scripts\MainWindow.xaml
+<#
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="LightStone" Width="1200" Height="800">
+    <DockPanel>
+        <!-- Menu and Toolbar -->
+        <StackPanel DockPanel.Dock="Top">
+            <Menu>
+                <MenuItem Header="File">
+                    <MenuItem Header="New Node" Command="{Binding NewNodeCommand}"/>
+                    <MenuItem Header="Save" Command="{Binding SaveCommand}"/>
+                    <Separator/>
+                    <MenuItem Header="Exit" Command="{Binding ExitCommand}"/>
+                </MenuItem>
+                <!-- Other menus -->
+            </Menu>
+            <ToolBar>
+                <Button Command="{Binding NewNodeCommand}">New</Button>
+                <Button Command="{Binding SaveCommand}">Save</Button>
+                <Separator/>
+                <!-- Other tools -->
+            </ToolBar>
+        </StackPanel>
+        
+        <!-- Status Bar -->
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Height="25">
+            <TextBlock Name="StatusText" VerticalAlignment="Center" Margin="5"/>
+            <ProgressBar Name="StatusProgress" Width="100" Height="15" Margin="5"/>
+        </StackPanel>
+        
+        <!-- Main Content -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300"/>
+                <ColumnDefinition Width="5"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            
+            <!-- Tree View -->
+            <DockPanel Grid.Column="0">
+                <TextBox DockPanel.Dock="Top" Watermark="Search nodes..." Margin="5"/>
+                <TreeView Name="DocumentTree"/>
+            </DockPanel>
+            
+            <!-- Splitter -->
+            <GridSplitter Grid.Column="1" Width="5"/>
+            
+            <!-- Content Area -->
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="5"/>
+                    <RowDefinition Height="200"/>
+                </Grid.RowDefinitions>
+                
+                <!-- Document Content -->
+                <DockPanel Grid.Row="0">
+                    <ToolBar DockPanel.Dock="Top">
+                        <!-- Content tools -->
+                    </ToolBar>
+                    <TextBox AcceptsReturn="True" TextWrapping="Wrap"/>
+                </DockPanel>
+                
+                <!-- Chat Area -->
+                <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"/>
+                <DockPanel Grid.Row="2">
+                    <!-- Chat interface -->
+                </DockPanel>
+            </Grid>
+        </Grid>
+    </DockPanel>
+</Window>
+#>
+
+# interface.ps1
+using namespace System.Windows
+
+# Load XAML and create window
+class MainWindow : Avalonia.Controls.Window {
+    $TreeView
+    $ContentBox
+    $AutoSaveManager
+    
+    MainWindow() {
+        $xaml = [System.IO.File]::ReadAllText("$PSScriptRoot\MainWindow.xaml")
+        $reader = [System.Xml.XmlReader]::Create([System.IO.StringReader]::new($xaml))
+        [Avalonia.Application]::Current.LoadComponent($this, $reader)
+        
+        $this.InitializeComponents()
+        $this.InitializeAutoSave()
+    }
+    
+    [void]InitializeComponents() {
+        $this.TreeView = $this.FindName("DocumentTree")
+        $this.ContentBox = $this.FindName("ContentBox")
+        
+        # Add event handlers
+        $this.TreeView.SelectionChanged += { $global:UIEvents.OnNodeSelect.Invoke($_.AddedItems[0]) }
+        $this.ContentBox.TextChanged += { 
+            if ($global:TempVars.CurrentNode) {
+                $global:UIEvents.OnNodeEdit.Invoke($global:TempVars.CurrentNode, $_.Text)
+            }
+        }
+    }
+    
+    [void]InitializeAutoSave() {
+        $this.AutoSaveManager = [AutoSaveManager]::new({
+            if ($global:TempVars.CurrentNode) {
+                Save-TreeNode -Node $global:TempVars.CurrentNode
+            }
+        })
+        $this.AutoSaveManager.Start()
+    }
+}

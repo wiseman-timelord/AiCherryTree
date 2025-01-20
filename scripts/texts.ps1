@@ -1,47 +1,37 @@
 # Text generation and processing module
 # texts.ps1
 
-# Configuration defaults
-$global:TextModelConfig = @{
-    Path = ".\models\Llama-3.2-3b-NSFW_Aesir_Uncensored.gguf"
-    BinaryPath = ".\data\llama-box.exe"
-    DefaultContextSize = 24576  # Default n_ctx
-    MinContextSize = 8192      # Minimum allowed
-    MaxContextSize = 131072    # Maximum allowed
-    DefaultBatchSize = 4096    # Default n_batch
-    MinBatchSize = 1024       # Minimum allowed
-    MaxBatchSize = 5120       # Maximum allowed
-    Temperature = 0.8
-    TopK = 40
-    TopP = 0.9
-    RepeatPenalty = 1.1
-    MaxTokens = -1            # -1 for dynamic based on context
-    MaxChars = 2400          # Maximum characters per node
-    ChatTemplate = "llama2"   # Default template
-    NumThreads = -1           # Auto-detect
+$settings = Get-Settings
+$global:TextModelConfig = $settings.TextModel
+$global:GPUConfig = $settings.GPU
+
+# GPU and model configurations
+$global:ModelConfig = @{
+    Text = @{
+        Path = $global:TextModelConfig.Path
+        ContextSize = $global:TextModelConfig.DefaultContextSize
+        BatchSize = $global:TextModelConfig.DefaultBatchSize
+        Temperature = $global:TextModelConfig.Temperature
+    }
+    Image = @{
+        Path = ".\models\FluxFusionV2-Q6_K.gguf"
+        DefaultSizes = @{
+            Scene = @(200, 200)
+            Person = @(100, 200)
+            Item = @(100, 100)
+        }
+    }
+    GPU = @{
+        MainGPU = 0
+        SplitMode = "layer"      # none, layer, row
+        DeviceList = @()         # Populated during initialization
+        CacheTypeK = "f16"
+        CacheTypeV = "f16"
+        DefragThreshold = 0.1
+    }
 }
 
-# Advanced sampler configuration
-$global:SamplerConfig = @{
-    PresencePenalty = 0.0
-    FrequencyPenalty = 0.0
-    DryMultiplier = 1.0
-    DryBase = 1.75
-    DryAllowedLength = 2
-    MinP = 0.1
-    TypicalP = 1.0
-}
-
-# GPU configuration
-$global:GPUConfig = @{
-    MainGPU = 0
-    SplitMode = "layer"      # none, layer, row
-    DeviceList = @()         # Populated during initialization
-    CacheTypeK = "f16"
-    CacheTypeV = "f16"
-    DefragThreshold = 0.1
-}
-
+# Update model initialization
 function Initialize-TextModel {
     param(
         [switch]$ForceReload,
@@ -51,37 +41,49 @@ function Initialize-TextModel {
     try {
         Write-StatusMessage "Initializing text model..." "Info"
         
-        # Check binary existence
-        if (-not (Test-Path $global:TextModelConfig.BinaryPath)) {
-            throw "llama-box binary not found at $($global:TextModelConfig.BinaryPath)"
+        # Validate required files
+        $modelPath = Join-Path $PSScriptRoot "..\models\Llama-3.2-3b-NSFW_Aesir_Uncensored.gguf"
+        $llamaPath = Join-Path $PSScriptRoot "..\data\llama-box.exe"
+        
+        if (-not (Test-Path $modelPath)) {
+            throw "Model file not found: $modelPath"
+        }
+        if (-not (Test-Path $llamaPath)) {
+            throw "llama-box not found: $llamaPath"
         }
         
-        # Check model file
-        if (-not (Test-Path $global:TextModelConfig.Path)) {
-            throw "Model file not found at $($global:TextModelConfig.Path)"
+        # Configure model parameters
+        $config = @{
+            Path = $modelPath
+            BinaryPath = $llamaPath
+            ContextSize = 32768
+            BatchSize = 4096
+            Temperature = 0.8
+            TopP = 0.9
+            RepeatPenalty = 1.1
         }
-
-        # Get available GPUs
-        $deviceList = Get-GPUDevices
-        $global:GPUConfig.DeviceList = $deviceList
-
-        # Test model loading with minimal context
+        
+        # Add custom config
+        foreach ($key in $CustomConfig.Keys) {
+            $config[$key] = $CustomConfig[$key]
+        }
+        
+        # Test model loading
         $testArgs = @(
-            "--ctx-size", "2048",
-            "--threads", "1",
-            "--model", $global:TextModelConfig.Path,
+            "--model", $config.Path,
+            "--ctx-size", $config.ContextSize,
             "--help"
         )
         
-        $testProcess = Start-Process -FilePath $global:TextModelConfig.BinaryPath `
-                                   -ArgumentList $testArgs `
-                                   -Wait -PassThru -NoNewWindow
-        
-        if ($testProcess.ExitCode -ne 0) {
-            throw "Model test failed with exit code $($testProcess.ExitCode)"
+        $process = Start-Process -FilePath $config.BinaryPath -ArgumentList $testArgs -Wait -PassThru -NoNewWindow
+        if ($process.ExitCode -ne 0) {
+            throw "Model initialization failed with exit code: $($process.ExitCode)"
         }
-
+        
+        # Store config globally
+        $global:TextModelConfig = $config
         $global:TempVars.TextModelLoaded = $true
+        
         Write-StatusMessage "Text model initialized successfully" "Success"
         return $true
     }
@@ -89,6 +91,59 @@ function Initialize-TextModel {
         Write-StatusMessage "Failed to initialize text model: $_" "Error"
         $global:TempVars.TextModelLoaded = $false
         return $false
+    }
+}
+
+# Add completion function
+function Get-TextCompletion {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Prompt,
+        [hashtable]$Options = @{},
+        [switch]$Stream
+    )
+    
+    try {
+        # Ensure model is initialized
+        if (-not $global:TempVars.TextModelLoaded) {
+            if (-not (Initialize-TextModel)) {
+                throw "Failed to initialize text model"
+            }
+        }
+        
+        # Build arguments
+        $args = @(
+            "--model", $global:TextModelConfig.Path,
+            "--ctx-size", $global:TextModelConfig.ContextSize,
+            "--temp", $global:TextModelConfig.Temperature,
+            "--top-p", $global:TextModelConfig.TopP,
+            "--repeat-penalty", $global:TextModelConfig.RepeatPenalty,
+            "--prompt", $Prompt
+        )
+        
+        # Add custom options
+        foreach ($key in $Options.Keys) {
+            $args += "--$($key.ToLower())", $Options[$key]
+        }
+        
+        if ($Stream) {
+            $process = Start-Process -FilePath $global:TextModelConfig.BinaryPath `
+                -ArgumentList $args -NoNewWindow -RedirectStandardOutput "$env:TEMP\stream.txt" -PassThru
+            
+            while (-not $process.HasExited) {
+                Get-Content "$env:TEMP\stream.txt" -Wait
+                Start-Sleep -Milliseconds 100
+            }
+            Remove-Item "$env:TEMP\stream.txt" -Force
+        }
+        else {
+            $output = & $global:TextModelConfig.BinaryPath $args
+            return $output
+        }
+    }
+    catch {
+        Write-Error "Text completion failed: $_"
+        return $null
     }
 }
 
@@ -267,37 +322,6 @@ function Get-NodeContext {
     }
     
     return $context
-}
-
-function Format-ModelResponse {
-    param(
-        [string]$Response,
-        [string]$Format = "text"
-    )
-    
-    $cleaned = $Response.Trim()
-    
-    switch ($Format) {
-        "text" { 
-            # Ensure response doesn't exceed max chars
-            if ($cleaned.Length -gt $global:TextModelConfig.MaxChars) {
-                $cleaned = $cleaned.Substring(0, $global:TextModelConfig.MaxChars)
-            }
-            return $cleaned 
-        }
-        "json" {
-            try {
-                return $cleaned | ConvertFrom-Json
-            }
-            catch {
-                Write-Error "Failed to parse JSON response"
-                return $null
-            }
-        }
-        default {
-            return $cleaned
-        }
-    }
 }
 
 # Web research integration

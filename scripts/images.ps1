@@ -2,43 +2,9 @@
 # images.ps1
 
 # Configuration defaults
-$global:ImageModelConfig = @{
-    Path = ".\models\FluxFusionV2-Q6_K.gguf"
-    BinaryPath = ".\data\llama-box.exe"
-    Steps = 4
-    Temperature = 0.7
-    CFGScale = 7.0
-    RepeatPenalty = 1.1
-    NumThreads = -1
-}
-
-# Image size presets with aspect ratios
-$global:ImageSizePresets = @{
-    Scene = @{
-        Width = 200
-        Height = 200
-        Description = "Full scene or landscape"
-    }
-    Person = @{
-        Width = 100
-        Height = 200
-        Description = "Character or portrait"
-    }
-    Item = @{
-        Width = 100
-        Height = 100
-        Description = "Object or item"
-    }
-}
-
-# GPU configuration (shared with text model)
-$global:ImageGPUConfig = @{
-    MainGPU = 0
-    SplitMode = "layer"
-    CacheTypeK = "f16"
-    CacheTypeV = "f16"
-    DefragThreshold = 0.1
-}
+$settings = Get-Settings
+$global:ImageModelConfig = $settings.ImageModel
+$global:GPUConfig = $settings.GPU
 
 function Initialize-ImageModel {
     param([switch]$ForceReload)
@@ -114,30 +80,20 @@ Respond with only one word: Scene, Person, or Item.
     return "Scene"
 }
 
+# Add image generation function
 function New-AIImage {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Prompt,
-        [string]$OutputPath,
-        [string]$ContentType = "Scene",
-        [hashtable]$Options = @{},
-        [switch]$AllowWebImages
+        [string]$Type = "Scene",
+        [string]$OutputPath = $null,
+        [hashtable]$Options = @{}
     )
     
     try {
-        # Check if we should use web image
-        if ($AllowWebImages) {
-            $needsWebImage = Test-NeedsWebImage -Prompt $Prompt
-            
-            if ($needsWebImage) {
-                return Get-WebImage -Query $Prompt -OutputPath $OutputPath
-            }
-        }
-        
-        # Get size preset
-        $sizePreset = $global:ImageSizePresets[$ContentType]
-        if (-not $sizePreset) {
-            throw "Invalid content type: $ContentType"
+        # Validate type
+        if (-not $global:ImageModelConfig.DefaultSize.ContainsKey($Type)) {
+            throw "Invalid image type: $Type. Must be Scene, Person, or Item."
         }
         
         # Generate output path if not provided
@@ -146,14 +102,41 @@ function New-AIImage {
             $OutputPath = Join-Path $global:PATHS.ImagesDir "$hash.png"
         }
         
+        # Get size configuration
+        $size = $global:ImageModelConfig.DefaultSize[$Type]
+        
         # Build arguments
         $args = @(
             "--model", $global:ImageModelConfig.Path,
+            "--width", $size.Width,
+            "--height", $size.Height,
             "--steps", $global:ImageModelConfig.Steps,
             "--temp", $global:ImageModelConfig.Temperature,
-            "--threads", $global:ImageModelConfig.NumThreads,
-            "--width", $sizePreset.Width,
-            "--height", $sizePreset.Height,
-            "--repeat-penalty", $global:ImageModelConfig.RepeatPenalty,
-            "--device", $global:ImageGPUConfig.MainGPU,
-            "--split-mode", $
+            "--cfg-scale", $global:ImageModelConfig.CFGScale,
+            "--prompt", $Prompt,
+            "--output", $OutputPath
+        )
+        
+        # Add custom options
+        foreach ($key in $Options.Keys) {
+            $args += "--$($key.ToLower())", $Options[$key]
+        }
+        
+        # Generate image
+        $process = Start-Process -FilePath $global:ImageModelConfig.BinaryPath `
+            -ArgumentList $args -Wait -PassThru -NoNewWindow
+        
+        if ($process.ExitCode -ne 0) {
+            throw "Image generation failed with exit code: $($process.ExitCode)"
+        }
+        
+        # Optimize generated image
+        $optimizedPath = Optimize-Image -InputPath $OutputPath
+        
+        return $optimizedPath
+    }
+    catch {
+        Write-Error "Failed to generate image: $_"
+        return $null
+    }
+}

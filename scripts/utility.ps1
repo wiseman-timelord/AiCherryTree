@@ -11,6 +11,18 @@ Add-Type -AssemblyName System.Drawing
 $script:SettingsCache = $null
 $script:SettingsSchema = @{
     # System Settings
+    Paths = @{
+        Type = "hashtable"
+        Default = @{
+            TreeFile = ".\data\tree.json"
+            BackupFile = ".\data\tree.backup.json"
+            DefaultTree = ".\data\default.tree.json"
+            ImagesDir = ".\data\images"
+            TextsDir = ".\data\texts"
+        }
+        Validate = { param($value) $value -is [hashtable] }
+        Description = "System paths configuration"
+    }
     AutoBackup = @{
         Type = "bool"
         Default = $true
@@ -67,17 +79,54 @@ $script:SettingsSchema = @{
     }
     
     # Model Settings
-    MaxContextSize = @{
-        Type = "int"
-        Default = 32768
-        Validate = { param($value) $value -in @(8192, 16384, 32768, 65536, 131072) }
-        Description = "Maximum context size for AI models"
+    TextModel = @{
+        Type = "hashtable"
+        Default = @{
+            Path = ".\models\Llama-3.2-3b-NSFW_Aesir_Uncensored.gguf"
+            BinaryPath = ".\data\llama-box.exe"
+            DefaultContextSize = 24576
+            MinContextSize = 8192
+            MaxContextSize = 131072
+            DefaultBatchSize = 4096
+            MinBatchSize = 1024
+            MaxBatchSize = 5120
+            Temperature = 0.8
+            TopK = 40
+            TopP = 0.9
+            RepeatPenalty = 1.1
+            MaxTokens = -1
+            MaxChars = 2400
+            ChatTemplate = "llama2"
+            NumThreads = -1
+        }
+        Validate = { param($value) $value -is [hashtable] }
+        Description = "Text model configuration"
     }
-    MaxBatchSize = @{
-        Type = "int"
-        Default = 2048
-        Validate = { param($value) $value -in @(2048, 4096) }
-        Description = "Maximum batch size for AI models"
+    ImageModel = @{
+        Type = "hashtable"
+        Default = @{
+            Path = ".\models\FluxFusionV2-Q6_K.gguf"
+            DefaultSizes = @{
+                Scene = @(200, 200)
+                Person = @(100, 200)
+                Item = @(100, 100)
+            }
+        }
+        Validate = { param($value) $value -is [hashtable] }
+        Description = "Image model configuration"
+    }
+    GPU = @{
+        Type = "hashtable"
+        Default = @{
+            MainGPU = 0
+            SplitMode = "layer"
+            DeviceList = @()
+            CacheTypeK = "f16"
+            CacheTypeV = "f16"
+            DefragThreshold = 0.1
+        }
+        Validate = { param($value) $value -is [hashtable] }
+        Description = "GPU configuration settings"
     }
     
     # Auto-save Settings
@@ -97,39 +146,31 @@ $script:SettingsSchema = @{
 
 # Settings Functions
 function Get-Settings {
-    if ($null -eq $script:SettingsCache) {
+    if (-not $script:SettingsCache) {
         $settingsPath = ".\data\persistent.psd1"
         try {
             if (Test-Path $settingsPath) {
                 $settings = Import-PowerShellDataFile $settingsPath
-                # Validate and apply defaults for missing settings
-                foreach ($key in $script:SettingsSchema.Keys) {
-                    if (-not $settings.ContainsKey($key)) {
-                        $settings[$key] = $script:SettingsSchema[$key].Default
-                    }
-                    elseif (-not (& $script:SettingsSchema[$key].Validate $settings[$key])) {
-                        Write-Warning "Invalid setting for $key, using default"
-                        $settings[$key] = $script:SettingsSchema[$key].Default
-                    }
-                }
             }
             else {
-                # Create default settings
                 $settings = @{}
-                foreach ($key in $script:SettingsSchema.Keys) {
+            }
+            
+            # Validate and apply defaults
+            foreach ($key in $script:SettingsSchema.Keys) {
+                if (-not $settings.ContainsKey($key) -or 
+                    -not (& $script:SettingsSchema[$key].Validate $settings[$key])) {
                     $settings[$key] = $script:SettingsSchema[$key].Default
                 }
             }
             $script:SettingsCache = $settings
         }
         catch {
-            Write-Error "Failed to load settings: $_"
-            # Return defaults if loading fails
-            $settings = @{}
+            Write-Error "Settings load failed: $_"
+            $script:SettingsCache = @{}
             foreach ($key in $script:SettingsSchema.Keys) {
-                $settings[$key] = $script:SettingsSchema[$key].Default
+                $script:SettingsCache[$key] = $script:SettingsSchema[$key].Default
             }
-            $script:SettingsCache = $settings
         }
     }
     return $script:SettingsCache
@@ -167,20 +208,7 @@ function Set-Settings {
         }
         
         # Save to file
-        $content = "@{`n"
-        foreach ($key in $currentSettings.Keys | Sort-Object) {
-            $value = $currentSettings[$key]
-            if ($value -is [string]) {
-                $value = "'$value'"
-            }
-            elseif ($value -is [bool]) {
-                $value = if ($value) { '$true' } else { '$false' }
-            }
-            $content += "    $key = $value`n"
-        }
-        $content += "}"
-        
-        Set-Content -Path $settingsPath -Value $content -Force
+        Export-PowerShellData1 -Data $currentSettings -Path $settingsPath
         $script:SettingsCache = $currentSettings
         
         # Remove backup if successful
@@ -207,7 +235,6 @@ function Reset-Settings {
         [string[]]$Keys
     )
     
-    $currentSettings = Get-Settings
     $defaults = @{}
     
     if ($Keys) {
@@ -237,6 +264,16 @@ function Get-RandomHash {
     $rng = [RNGCryptoServiceProvider]::new()
     $rng.GetBytes($bytes)
     return ([Convert]::ToHexString($bytes)).ToLower().Substring(0, $Length)
+}
+
+function Convert-TreeNodeToViewModel {
+    param([hashtable]$Node)
+    return @{
+        Id = $Node.Id
+        Title = $Node.Title
+        HasContent = (-not [string]::IsNullOrEmpty($Node.TextHash))
+        Children = @()
+    }
 }
 
 function Test-FileHash {
@@ -273,7 +310,7 @@ function Optimize-Image {
         # Generate output path if not provided
         if (-not $OutputPath) {
             $hash = Get-RandomHash
-            $OutputPath = Join-Path $global:PATHS.ImagesDir "$hash.$($settings.ImageFormat)"
+            $OutputPath = Join-Path $settings.Paths.ImagesDir "$hash.$($settings.ImageFormat)"
         }
 
         # Process image

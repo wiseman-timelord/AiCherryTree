@@ -4,14 +4,15 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# Load global variables and paths
-. ".\data\temporary.ps1"
-
 # Import required modules
 Import-Module "$PSScriptRoot\scripts\utility.ps1"
 Import-Module "$PSScriptRoot\scripts\interface.ps1"
 Import-Module "$PSScriptRoot\scripts\model.ps1"
 Import-Module "$PSScriptRoot\scripts\internet.ps1"
+
+# Initialize settings and paths
+$settings = Get-Settings
+$global:PATHS = $settings.Paths
 
 # Functions
 function Write-StatusMessage {
@@ -29,21 +30,38 @@ function Write-StatusMessage {
 }
 
 function Test-Prerequisites {
-    # Check if ImageMagick is installed
-    if (-not (Test-Path ".\data\ImageMagick\magick.exe")) {
-        throw "ImageMagick not found. Please run installer first."
-    }
-
-    # Check if Llama binary exists
-    if (-not (Test-Path ".\data\cudart-llama-bin-win-cu11.7")) {
-        throw "Llama binary not found. Please run installer first."
-    }
-
-    # Check for required files
-    foreach ($path in $global:PATHS.Values) {
-        if (-not (Test-Path (Split-Path $path))) {
-            throw "Required directory missing: $path"
+    try {
+        # Check required paths
+        if (-not (Test-Path ".\data\ImageMagick\magick.exe")) {
+            throw "ImageMagick not found. Please run installer first."
         }
+
+        if (-not (Test-Path ".\data\cudart-llama-bin-win-cu11.7")) {
+            throw "Llama binary not found. Please run installer first."
+        }
+
+        # Check model paths
+        $settings = Get-Settings
+        if (-not (Test-Path $settings.TextModel.Path)) {
+            throw "Text model not found: $($settings.TextModel.Path)"
+        }
+        if (-not (Test-Path $settings.ImageModel.Path)) {
+            throw "Image model not found: $($settings.ImageModel.Path)"
+        }
+
+        # Check directories
+        foreach ($path in $settings.Paths.Values) {
+            $dir = Split-Path $path
+            if (-not (Test-Path $dir)) {
+                New-Item -ItemType Directory -Path $dir -Force
+            }
+        }
+
+        return $true
+    }
+    catch {
+        Write-StatusMessage $_.Exception.Message "Error"
+        return $false
     }
 }
 
@@ -67,51 +85,58 @@ function Test-TreeFileIntegrity {
 }
 
 function Initialize-TreeFile {
-    if (Test-Path $global:PATHS.TreeFile) {
-        if (Test-TreeFileIntegrity -FilePath $global:PATHS.TreeFile) {
-            # Backup working tree file
-            Copy-Item $global:PATHS.TreeFile $global:PATHS.BackupFile -Force
-            Write-StatusMessage "Tree file loaded and backed up" "Success"
-            return $true
-        }
-        else {
-            Write-StatusMessage "Tree file corrupted, attempting recovery..." "Warning"
-            if (Test-Path $global:PATHS.BackupFile) {
-                Copy-Item $global:PATHS.BackupFile $global:PATHS.TreeFile -Force
-                Write-StatusMessage "Recovered from backup file" "Success"
-                return $true
-            }
-        }
-    }
-    
-    # If no valid tree or backup exists, create from default
-    if (Test-Path $global:PATHS.DefaultTree) {
-        Copy-Item $global:PATHS.DefaultTree $global:PATHS.TreeFile -Force
-        Write-StatusMessage "Created new tree file from default template" "Success"
+    if ((Test-Path $global:PATHS.TreeFile) -and (Test-TreeFileIntegrity $global:PATHS.TreeFile)) {
+        Copy-Item $global:PATHS.TreeFile $global:PATHS.BackupFile -Force
+        Write-StatusMessage "Tree file loaded and backed up" "Success"
         return $true
     }
     
-    Write-StatusMessage "Unable to initialize tree file" "Error"
+    if (Test-Path $global:PATHS.BackupFile) {
+        Copy-Item $global:PATHS.BackupFile $global:PATHS.TreeFile -Force
+        Write-StatusMessage "Recovered from backup file" "Success"
+        return $true
+    }
+    
+    if (Test-Path $global:PATHS.DefaultTree) {
+        Copy-Item $global:PATHS.DefaultTree $global:PATHS.TreeFile -Force
+        Write-StatusMessage "Created new tree from template" "Success"
+        return $true
+    }
+    
+    Write-StatusMessage "Tree initialization failed" "Error"
     return $false
 }
 
 function Initialize-Configuration {
     try {
-        # Load configuration
-        $config = Import-PowerShellData1 -Path ".\data\persistent.psd1"
-        
         # Set environment variables
         $env:LLAMA_CUDA_UNIFIED_MEMORY = 1
         $env:PATH = ".\data\ImageMagick;" + $env:PATH
         
-        # Update global settings
-        $global:TempVars.IsInitialized = $true
-        $global:TempVars.LastBackup = Get-Date
+        # Initialize global state
+        $global:TempVars = @{
+            IsInitialized = $true
+            LastBackup = Get-Date
+            TextModelLoaded = $false
+            ImageModelLoaded = $false
+            CurrentNode = $null
+        }
         
-        return $config
+        # Load and return settings
+        $settings = Get-Settings
+        
+        # Create required directories if they don't exist
+        foreach ($path in $settings.Paths.Values) {
+            $dir = Split-Path $path
+            if (-not (Test-Path $dir)) {
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            }
+        }
+        
+        return $settings
     }
     catch {
-        Write-StatusMessage "Failed to initialize configuration: $_" "Error"
+        Write-StatusMessage "Configuration initialization failed: $_" "Error"
         throw
     }
 }
@@ -121,7 +146,9 @@ function Start-LightStone {
     
     try {
         # Run initialization checks
-        Test-Prerequisites
+        if (-not (Test-Prerequisites)) {
+            throw "Prerequisites check failed"
+        }
         
         # Initialize components
         if (-not (Initialize-TreeFile)) {
@@ -133,7 +160,9 @@ function Start-LightStone {
         Initialize-AIModel
         
         # Clean temp directory
-        Get-ChildItem ".\temp" | Remove-Item -Force -Recurse
+        if (Test-Path ".\temp") {
+            Get-ChildItem ".\temp" | Remove-Item -Force -Recurse
+        }
         
         # Start interface
         Write-StatusMessage "Launching interface..." "Info"
