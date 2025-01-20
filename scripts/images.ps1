@@ -1,50 +1,10 @@
 # Image generation module
-# images.ps1
+# .\scripts\images.ps1
 
-# Configuration defaults
-$settings = Get-Settings
-$global:ImageModelConfig = $settings.ImageModel
-$global:GPUConfig = $settings.GPU
-
-function Initialize-ImageModel {
-    param([switch]$ForceReload)
-    
-    try {
-        Write-StatusMessage "Initializing image model..." "Info"
-        
-        # Check binary and model existence
-        if (-not (Test-Path $global:ImageModelConfig.BinaryPath)) {
-            throw "llama-box binary not found"
-        }
-        if (-not (Test-Path $global:ImageModelConfig.Path)) {
-            throw "Image model not found"
-        }
-        
-        # Test model with minimal generation
-        $testArgs = @(
-            "--model", $global:ImageModelConfig.Path,
-            "--threads", "1",
-            "--help"
-        )
-        
-        $testProcess = Start-Process -FilePath $global:ImageModelConfig.BinaryPath `
-                                   -ArgumentList $testArgs `
-                                   -Wait -PassThru -NoNewWindow
-        
-        if ($testProcess.ExitCode -ne 0) {
-            throw "Image model test failed"
-        }
-
-        $global:TempVars.ImageModelLoaded = $true
-        Write-StatusMessage "Image model initialized successfully" "Success"
-        return $true
-    }
-    catch {
-        Write-StatusMessage "Failed to initialize image model: $_" "Error"
-        $global:TempVars.ImageModelLoaded = $false
-        return $false
-    }
-}
+# Import required modules
+Import-Module "$PSScriptRoot\utility.ps1"
+Import-Module "$PSScriptRoot\model.ps1"
+Import-Module "$PSScriptRoot\prompts.ps1"
 
 function Get-ContentType {
     param(
@@ -52,22 +12,16 @@ function Get-ContentType {
         [string]$Description
     )
     
-    # Create analysis prompt
-    $prompt = @"
-Analyze the following description and classify it as one of these types:
-- Scene: Full environment, landscape, or location
-- Person: Character, portrait, or figure
-- Item: Single object, item, or detail
-
-Description: $Description
-
-Respond with only one word: Scene, Person, or Item.
-"@
+    # Create analysis prompt using prompts.ps1
+    $prompt = New-ContentPrompt -Type "ImageGeneration" -Title "Content Type Analysis" -Context $Description `
+        -Parameters @{
+            Instructions = "Analyze this description and classify it as Scene, Person, or Item. Respond with only one word."
+        }
     
     # Use text model to classify
     $result = Send-TextPrompt -Prompt $prompt -Options @{
-        Temperature = 0.1  # Low temperature for consistent results
-        MaxTokens = 10    # Only need a single word
+        Temperature = 0.1
+        MaxTokens = 10
     }
     
     # Clean and validate response
@@ -80,7 +34,6 @@ Respond with only one word: Scene, Person, or Item.
     return "Scene"
 }
 
-# Add image generation function
 function New-AIImage {
     param(
         [Parameter(Mandatory = $true)]
@@ -91,52 +44,144 @@ function New-AIImage {
     )
     
     try {
-        # Validate type
-        if (-not $global:ImageModelConfig.DefaultSize.ContainsKey($Type)) {
-            throw "Invalid image type: $Type. Must be Scene, Person, or Item."
+        # Check model health through model.ps1
+        if (-not (Test-ModelHealth -ModelType "Image")) {
+            throw "Image model not initialized or unhealthy"
         }
         
         # Generate output path if not provided
         if (-not $OutputPath) {
             $hash = Get-RandomHash
-            $OutputPath = Join-Path $global:PATHS.ImagesDir "$hash.png"
+            $OutputPath = Join-Path $global:PATHS.ImagesDir "$hash.jpg"
         }
         
-        # Get size configuration
-        $size = $global:ImageModelConfig.DefaultSize[$Type]
+        # Prepare prompts and parameters
+        $enhancedPrompt = New-ContentPrompt -Type "ImageGeneration" -Title $Type `
+            -Context $Prompt -Parameters @{
+                Style = "Detailed, high quality"
+                Format = "Specific to $Type type"
+            }
         
-        # Build arguments
-        $args = @(
-            "--model", $global:ImageModelConfig.Path,
-            "--width", $size.Width,
-            "--height", $size.Height,
-            "--steps", $global:ImageModelConfig.Steps,
-            "--temp", $global:ImageModelConfig.Temperature,
-            "--cfg-scale", $global:ImageModelConfig.CFGScale,
-            "--prompt", $Prompt,
-            "--output", $OutputPath
-        )
+        # Get model config from global state
+        $modelConfig = $global:ModelState.ImageModel.Config
         
-        # Add custom options
-        foreach ($key in $Options.Keys) {
-            $args += "--$($key.ToLower())", $Options[$key]
+        # Let model.ps1 handle the generation
+        $result = New-AIImage -Prompt $enhancedPrompt -Type $Type -OutputPath $OutputPath `
+            -Options $Options
+        
+        if (-not $result) {
+            throw "Image generation failed"
         }
         
-        # Generate image
-        $process = Start-Process -FilePath $global:ImageModelConfig.BinaryPath `
-            -ArgumentList $args -Wait -PassThru -NoNewWindow
-        
-        if ($process.ExitCode -ne 0) {
-            throw "Image generation failed with exit code: $($process.ExitCode)"
-        }
-        
-        # Optimize generated image
-        $optimizedPath = Optimize-Image -InputPath $OutputPath
-        
-        return $optimizedPath
+        # Optimize the generated image
+        return Optimize-Image -InputPath $result
     }
     catch {
         Write-Error "Failed to generate image: $_"
         return $null
     }
 }
+
+function Optimize-Image {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$InputPath,
+        [string]$OutputPath = $null,
+        [int]$MaxSize = 1024,
+        [int]$Quality = 85
+    )
+    
+    try {
+        # Get ImageMagick path
+        $magick = Join-Path $PSScriptRoot "..\data\ImageMagick\magick.exe"
+        if (-not (Test-Path $magick)) {
+            throw "ImageMagick not found"
+        }
+        
+        # Generate output path if not provided
+        if (-not $OutputPath) {
+            $extension = [System.IO.Path]::GetExtension($InputPath)
+            $hash = Get-RandomHash
+            $OutputPath = Join-Path $global:PATHS.ImagesDir "$hash$extension"
+        }
+        
+        # Build optimization arguments
+        $args = @(
+            $InputPath,
+            "-resize", "${MaxSize}x${MaxSize}>",  # Only shrink if larger
+            "-quality", $Quality,
+            "-strip",                             # Remove metadata
+            "-interlace", "Plane",               # Progressive JPG
+            "-auto-orient",                      # Fix orientation
+            $OutputPath
+        )
+        
+        # Run ImageMagick
+        $process = Start-Process -FilePath $magick -ArgumentList $args `
+            -Wait -PassThru -NoNewWindow
+        
+        if ($process.ExitCode -ne 0) {
+            throw "ImageMagick optimization failed"
+        }
+        
+        return $OutputPath
+    }
+    catch {
+        Write-Error "Failed to optimize image: $_"
+        return $null
+    }
+}
+
+function Get-ImageMetadata {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ImagePath
+    )
+    
+    try {
+        # Check if file exists
+        if (-not (Test-Path $ImagePath)) {
+            throw "Image file not found"
+        }
+        
+        # Get basic file info
+        $fileInfo = Get-Item $ImagePath
+        
+        # Use ImageMagick to get detailed info
+        $magick = Join-Path $PSScriptRoot "..\data\ImageMagick\magick.exe"
+        $args = @(
+            "identify",
+            "-format", "%w|%h|%m|%Q|%[size]",
+            $ImagePath
+        )
+        
+        $result = & $magick $args
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to get image metadata"
+        }
+        
+        # Parse the result
+        $parts = $result -split '\|'
+        if ($parts.Count -ge 5) {
+            return @{
+                Path = $ImagePath
+                Width = [int]$parts[0]
+                Height = [int]$parts[1]
+                Format = $parts[2]
+                Quality = if ($parts[3] -eq '') { $null } else { [int]$parts[3] }
+                Size = $parts[4]
+                Created = $fileInfo.CreationTime
+                Modified = $fileInfo.LastWriteTime
+            }
+        }
+        
+        throw "Invalid metadata format"
+    }
+    catch {
+        Write-Error "Failed to get image metadata: $_"
+        return $null
+    }
+}
+
+# Export functions
+Export-ModuleMember -Function *

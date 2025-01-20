@@ -1,4 +1,4 @@
-# .\launcher.ps1
+# .\scripts\launcher.ps1
 
 # Set strict mode and error handling
 Set-StrictMode -Version Latest
@@ -6,9 +6,12 @@ $ErrorActionPreference = "Stop"
 
 # Import required modules
 Import-Module "$PSScriptRoot\scripts\utility.ps1"
-Import-Module "$PSScriptRoot\scripts\interface.ps1"
 Import-Module "$PSScriptRoot\scripts\model.ps1"
+Import-Module "$PSScriptRoot\scripts\interface.ps1"
+Import-Module "$PSScriptRoot\scripts\texts.ps1"
+Import-Module "$PSScriptRoot\scripts\images.ps1"
 Import-Module "$PSScriptRoot\scripts\internet.ps1"
+Import-Module "$PSScriptRoot\scripts\prompts.ps1"
 
 # Initialize settings and paths
 $settings = Get-Settings
@@ -36,20 +39,23 @@ function Test-Prerequisites {
             throw "ImageMagick not found. Please run installer first."
         }
 
-        if (-not (Test-Path ".\data\cudart-llama-bin-win-cu11.7")) {
-            throw "Llama binary not found. Please run installer first."
+        if (-not (Test-Path ".\data\clblast.dll")) {
+            throw "CLBlast library not found. Please run installer first."
         }
 
         # Check model paths
         $settings = Get-Settings
-        if (-not (Test-Path $settings.TextModel.Path)) {
-            throw "Text model not found: $($settings.TextModel.Path)"
+        $textModelPath = Join-Path $PSScriptRoot "models\Llama-3.2-3b-NSFW_Aesir_Uncensored.gguf"
+        $imageModelPath = Join-Path $PSScriptRoot "models\FluxFusionV2-Q6_K.gguf"
+        
+        if (-not (Test-Path $textModelPath)) {
+            throw "Text model not found: $textModelPath"
         }
-        if (-not (Test-Path $settings.ImageModel.Path)) {
-            throw "Image model not found: $($settings.ImageModel.Path)"
+        if (-not (Test-Path $imageModelPath)) {
+            throw "Image model not found: $imageModelPath"
         }
 
-        # Check directories
+        # Check directories exist
         foreach ($path in $settings.Paths.Values) {
             $dir = Split-Path $path
             if (-not (Test-Path $dir)) {
@@ -109,16 +115,17 @@ function Initialize-TreeFile {
 
 function Initialize-Configuration {
     try {
-        # Set environment variables
-        $env:LLAMA_CUDA_UNIFIED_MEMORY = 1
-        $env:PATH = ".\data\ImageMagick;" + $env:PATH
-        
+        # Create required directories
+        'temp', 'data', 'models', 'foliage' | ForEach-Object {
+            if (-not (Test-Path ".\$_")) {
+                New-Item -ItemType Directory -Path ".\$_" -Force
+            }
+        }
+
         # Initialize global state
         $global:TempVars = @{
             IsInitialized = $true
             LastBackup = Get-Date
-            TextModelLoaded = $false
-            ImageModelLoaded = $false
             CurrentNode = $null
         }
         
@@ -141,6 +148,37 @@ function Initialize-Configuration {
     }
 }
 
+function Initialize-AIEnvironment {
+    try {
+        Write-StatusMessage "Initializing AI environment..." "Info"
+
+        # Initialize GPU environment first
+        if (-not (Initialize-GPUEnvironment)) {
+            Write-StatusMessage "GPU initialization failed, falling back to CPU" "Warning"
+        }
+
+        # Initialize models
+        if (-not (Initialize-Models)) {
+            throw "Failed to initialize AI models"
+        }
+
+        # Verify model health
+        $textHealth = Test-ModelHealth -ModelType "Text"
+        $imageHealth = Test-ModelHealth -ModelType "Image"
+
+        if (-not ($textHealth -and $imageHealth)) {
+            throw "Model health check failed"
+        }
+
+        Write-StatusMessage "AI environment initialized successfully" "Success"
+        return $true
+    }
+    catch {
+        Write-StatusMessage "Failed to initialize AI environment: $_" "Error"
+        return $false
+    }
+}
+
 function Start-LightStone {
     Write-StatusMessage "Starting LightStone..." "Info"
     
@@ -156,8 +194,11 @@ function Start-LightStone {
         }
         
         $config = Initialize-Configuration
-        Write-StatusMessage "Initializing AI model..." "Info"
-        Initialize-AIModel
+        
+        # Initialize AI environment
+        if (-not (Initialize-AIEnvironment)) {
+            throw "Failed to initialize AI environment"
+        }
         
         # Clean temp directory
         if (Test-Path ".\temp") {

@@ -1,5 +1,5 @@
 # Core utilities and settings management
-# utility.ps1
+# .\scripts\utility.ps1
 
 using namespace System.Security.Cryptography
 using namespace System.IO

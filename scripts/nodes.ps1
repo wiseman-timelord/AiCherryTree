@@ -1,5 +1,5 @@
 # Node management and operations
-# nodes.ps1
+# .\scripts\nodes.ps1
 
 # Import required modules
 . "$PSScriptRoot\utility.ps1"
