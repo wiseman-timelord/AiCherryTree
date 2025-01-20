@@ -26,11 +26,12 @@ $global:UIEvents = @{
             Update-ContentPanel 
         }
         OnCreate = { 
-            param($ParentNode)
-            $newNode = New-TreeNode -Title "New Node" -ParentId $ParentNode.Id
+            param($ParentNode, $Title = "New Node")
+            $newNode = New-TreeNode -Title $Title -ParentId $ParentNode.Id
             Save-TreeNode -Node $newNode
             Update-TreeView
             Show-StatusMessage "Node created successfully" "Success"
+            return $newNode
         }
         OnDelete = {
             param($Node)
@@ -38,13 +39,25 @@ $global:UIEvents = @{
                 Remove-TreeNode -NodeId $Node.Id
                 Update-TreeView
                 Show-StatusMessage "Node deleted" "Success"
+                return $true
             }
+            return $false
         }
         OnEdit = {
             param($Node, $Content)
             $Node.Content = $Content
             Save-TreeNode -Node $Node
             Show-StatusMessage "Changes saved" "Success"
+        }
+    }
+    Chat = @{
+        OnMessageReceived = {
+            param($Message, $Context)
+            $global:MainWindow.ProcessChatMessage($Message, $Context)
+        }
+        OnCommandExecuted = {
+            param($Command, $Result)
+            $global:MainWindow.HandleCommandResult($Command, $Result)
         }
     }
     Search = @{
@@ -80,12 +93,22 @@ class AutoSaveManager {
 
 # Main window class
 class MainWindow : Avalonia.Controls.Window {
+    # UI Components
     $TreeView
+    $SearchBox
     $ContentBox
-    $ChatBox
+    $ChatPanel
+    $ChatInput
+    $ChatOutput
+    $ChatSendButton
     $StatusText
     $StatusProgress
     $AutoSaveManager
+    
+    # Chat State
+    $ChatHistory = @()
+    $IsProcessingMessage = $false
+    $LastCommand = $null
     
     MainWindow() {
         # Load XAML
@@ -105,12 +128,16 @@ class MainWindow : Avalonia.Controls.Window {
     [void]InitializeComponents() {
         # Get controls
         $this.TreeView = $this.FindName("DocumentTree")
+        $this.SearchBox = $this.FindName("SearchBox")
         $this.ContentBox = $this.FindName("ContentBox")
-        $this.ChatBox = $this.FindName("ChatBox")
+        $this.ChatPanel = $this.FindName("ChatPanel")
+        $this.ChatInput = $this.FindName("ChatInput")
+        $this.ChatOutput = $this.FindName("ChatOutput")
+        $this.ChatSendButton = $this.FindName("ChatSendButton")
         $this.StatusText = $this.FindName("StatusText")
         $this.StatusProgress = $this.FindName("StatusProgress")
         
-        # Add event handlers
+        # Tree and Content handlers
         $this.TreeView.SelectionChanged += { $global:UIEvents.NodeOperations.OnSelect.Invoke($_.AddedItems[0]) }
         $this.ContentBox.TextChanged += { 
             if ($global:TempVars.CurrentNode) {
@@ -118,9 +145,179 @@ class MainWindow : Avalonia.Controls.Window {
             }
         }
         
-        # Add search handler
-        $searchBox = $this.FindName("SearchBox")
-        $searchBox.TextChanged += { $global:UIEvents.Search.OnChange.Invoke($_.Text) }
+        # Search handler
+        $this.SearchBox.TextChanged += { $global:UIEvents.Search.OnChange.Invoke($_.Text) }
+        
+        # Chat handlers
+        $this.ChatSendButton.Click += { $this.ProcessChatMessage($this.ChatInput.Text) }
+        $this.ChatInput.KeyDown += {
+            param($sender, $e)
+            if ($e.Key -eq [Avalonia.Input.Key]::Enter -and -not $e.KeyModifiers) {
+                $this.ProcessChatMessage($this.ChatInput.Text)
+                $e.Handled = $true
+            }
+        }
+        
+        # Initialize chat output
+        $this.ChatOutput.IsReadOnly = $true
+        $this.ChatOutput.TextWrapping = [Avalonia.Media.TextWrapping]::Wrap
+        $this.AppendChatMessage("System", "Chat interface initialized. Ready to assist.")
+    }
+    
+    [void]ProcessChatMessage([string]$Message, [hashtable]$AdditionalContext = @{}) {
+        if ($this.IsProcessingMessage -or [string]::IsNullOrWhiteSpace($Message)) {
+            return
+        }
+        
+        try {
+            $this.IsProcessingMessage = $true
+            $this.ChatSendButton.IsEnabled = $false
+            $this.ChatInput.IsEnabled = $false
+            
+            # Add user message to chat
+            $this.AppendChatMessage("User", $Message)
+            $this.ChatInput.Text = ""
+            
+            # Build context
+            $context = @{
+                CurrentNode = $global:TempVars.CurrentNode
+                CurrentNodeContent = if ($global:TempVars.CurrentNode) {
+                    Get-TreeNodeContent $global:TempVars.CurrentNode.TextHash
+                } else { $null }
+                LastCommand = $this.LastCommand
+            }
+            
+            # Add additional context
+            foreach ($key in $AdditionalContext.Keys) {
+                $context[$key] = $AdditionalContext[$key]
+            }
+            
+            # Get AI response
+            $result = Send-ChatPrompt -Message $Message -Context $context
+            
+            # Add response to chat
+            $this.AppendChatMessage("Assistant", $result.Message)
+            
+            # Process commands
+            foreach ($command in $result.Commands) {
+                $this.ExecuteAICommand($command)
+            }
+        }
+        catch {
+            $this.AppendChatMessage("System", "Error: $_")
+        }
+        finally {
+            $this.IsProcessingMessage = $false
+            $this.ChatSendButton.IsEnabled = $true
+            $this.ChatInput.IsEnabled = $true
+        }
+    }
+    
+    [void]AppendChatMessage([string]$Sender, [string]$Message) {
+        $timestamp = Get-Date -Format "HH:mm:ss"
+        $formattedMessage = "[$timestamp] $Sender:`n$Message`n`n"
+        
+        $this.ChatOutput.Text += $formattedMessage
+        $this.ChatOutput.CaretIndex = $this.ChatOutput.Text.Length
+        $this.ChatOutput.ScrollToEnd()
+        
+        # Add to history
+        $this.ChatHistory += @{
+            Timestamp = $timestamp
+            Sender = $Sender
+            Message = $Message
+        }
+        
+        # Keep chat history within reasonable limits
+        if ($this.ChatHistory.Count > 100) {
+            $this.ChatHistory = $this.ChatHistory[-100..-1]
+        }
+    }
+    
+    [void]ExecuteAICommand([hashtable]$Command) {
+        $this.LastCommand = $Command
+        
+        try {
+            switch ($Command.Type) {
+                "CreateNode" {
+                    $title = $Command.Parameters[0]
+                    $this.AppendChatMessage("System", "Creating new node: $title")
+                    $newNode = $global:UIEvents.NodeOperations.OnCreate.Invoke(
+                        $global:TempVars.CurrentNode, 
+                        $title
+                    )
+                    if ($newNode) {
+                        $global:TempVars.CurrentNode = $newNode
+                        Update-ContentPanel
+                    }
+                }
+                "UpdateNode" {
+                    if ($global:TempVars.CurrentNode) {
+                        $content = $Command.Parameters[0]
+                        $this.AppendChatMessage("System", "Updating node content")
+                        $global:UIEvents.NodeOperations.OnEdit.Invoke(
+                            $global:TempVars.CurrentNode, 
+                            $content
+                        )
+                    }
+                }
+                "DeleteNode" {
+                    if ($global:TempVars.CurrentNode) {
+                        $this.AppendChatMessage("System", "Deleting current node")
+                        $global:UIEvents.NodeOperations.OnDelete.Invoke($global:TempVars.CurrentNode)
+                    }
+                }
+                "GenerateContent" {
+                    $type = $Command.Parameters[0]
+                    $prompt = $Command.Parameters[1]
+                    $this.AppendChatMessage("System", "Generating $type content...")
+                    
+                    switch ($type) {
+                        "Text" {
+                            $content = Send-TextPrompt -Prompt $prompt -Options @{
+                                Temperature = 0.7
+                                MaxTokens = 2000
+                            }
+                            if ($global:TempVars.CurrentNode) {
+                                $global:UIEvents.NodeOperations.OnEdit.Invoke(
+                                    $global:TempVars.CurrentNode, 
+                                    $content
+                                )
+                            }
+                        }
+                        "Image" {
+                            $imageType = Get-ContentType -Description $prompt
+                            $this.AppendChatMessage(
+                                "System", 
+                                "Detected image type: $imageType. Generating..."
+                            )
+                            # Image generation will be implemented here
+                        }
+                    }
+                }
+                "Research" {
+                    $query = $Command.Parameters[0]
+                    $this.AppendChatMessage("System", "Researching: $query")
+                    $results = Get-WebResearch -Query $query
+                    $this.AppendChatMessage("System", "Research complete")
+                    $this.ProcessChatMessage("Research results found", @{
+                        ResearchResults = $results
+                    })
+                }
+            }
+        }
+        catch {
+            $this.AppendChatMessage("System", "Command execution failed: $_")
+        }
+    }
+    
+    [void]HandleCommandResult($Command, $Result) {
+        if ($Result.Success) {
+            $this.AppendChatMessage("System", "Command completed: $($Command.Type)")
+        }
+        else {
+            $this.AppendChatMessage("System", "Command failed: $($Result.Error)")
+        }
     }
     
     [void]InitializeAutoSave() {
@@ -134,7 +331,9 @@ class MainWindow : Avalonia.Controls.Window {
     
     [void]InitializeCommands() {
         # Menu commands
-        $this.FindName("NewNodeCommand").Execute += { $global:UIEvents.NodeOperations.OnCreate.Invoke($global:TempVars.CurrentNode) }
+        $this.FindName("NewNodeCommand").Execute += { 
+            $global:UIEvents.NodeOperations.OnCreate.Invoke($global:TempVars.CurrentNode) 
+        }
         $this.FindName("SaveCommand").Execute += { 
             if ($global:TempVars.CurrentNode) {
                 Save-TreeNode -Node $global:TempVars.CurrentNode
@@ -143,7 +342,7 @@ class MainWindow : Avalonia.Controls.Window {
         }
         $this.FindName("ExitCommand").Execute += { $this.Close() }
         
-        # Add keyboard shortcuts
+        # Keyboard shortcuts
         $this.KeyDown += {
             param($sender, $e)
             if ($e.KeyModifiers -eq [Avalonia.Input.KeyModifiers]::Control) {
@@ -157,7 +356,9 @@ class MainWindow : Avalonia.Controls.Window {
                     }
                     ([Avalonia.Input.Key]::N) {
                         if ($global:TempVars.CurrentNode) {
-                            $global:UIEvents.NodeOperations.OnCreate.Invoke($global:TempVars.CurrentNode)
+                            $global:UIEvents.NodeOperations.OnCreate.Invoke(
+                                $global:TempVars.CurrentNode
+                            )
                             $e.Handled = $true
                         }
                     }
@@ -206,7 +407,7 @@ function Show-Progress {
     param(
         [int]$Value,
         [string]$Message
-    )
+	)
     $global:MainWindow.StatusProgress.Value = $Value
     $global:MainWindow.StatusProgress.IsVisible = $Value -gt 0 -and $Value -lt 100
     
@@ -239,6 +440,12 @@ function Update-ContentPanel {
         if ($content) {
             $global:MainWindow.ContentBox.Text = $content
         }
+        else {
+            $global:MainWindow.ContentBox.Text = ""
+        }
+    }
+    else {
+        $global:MainWindow.ContentBox.Text = ""
     }
 }
 

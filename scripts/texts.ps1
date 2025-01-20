@@ -370,5 +370,127 @@ function Get-WebResearch {
     return ($content -join "`n`n")
 }
 
+function Format-ChatPrompt {
+    param(
+        [string]$UserMessage,
+        [hashtable]$Context = @{},
+        [string]$SystemPrompt = ""
+    )
+    
+    # Build context section
+    $contextText = ""
+    if ($Context.CurrentNode) {
+        $contextText += "Current Node: $($Context.CurrentNode.Title)`n"
+        if ($Context.CurrentNode.Content) {
+            $contextText += "Node Content: $($Context.CurrentNode.Content)`n"
+        }
+    }
+    
+    # Default system prompt if none provided
+    if (-not $SystemPrompt) {
+        $SystemPrompt = @"
+You are assisting with a document tree management system. You can:
+1. Create new nodes
+2. Update existing nodes
+3. Generate content
+4. Provide information about the system
+
+Use commands like:
+##COMMAND:CreateNode:Title## - Create a new node
+##COMMAND:UpdateNode:Content## - Update current node
+##COMMAND:GenerateContent:Type:Prompt## - Generate content
+
+Always confirm actions before executing them.
+"@
+    }
+
+    # Combine all parts
+    $fullPrompt = @"
+$SystemPrompt
+
+Context:
+$contextText
+
+User Message:
+$UserMessage
+
+Provide a helpful response and include any necessary commands.
+"@
+
+    return $fullPrompt
+}
+
+function Process-ChatResponse {
+    param(
+        [string]$Response,
+        [scriptblock]$CommandHandler
+    )
+    
+    $result = @{
+        Message = $Response
+        Commands = @()
+    }
+    
+    # Extract commands
+    $pattern = '##COMMAND:([^#]+)##'
+    $matches = [regex]::Matches($Response, $pattern)
+    
+    foreach ($match in $matches) {
+        $command = $match.Groups[1].Value.Trim()
+        $parts = $command -split ':'
+        
+        $commandInfo = @{
+            Type = $parts[0]
+            Parameters = $parts[1..$parts.Length]
+        }
+        
+        $result.Commands += $commandInfo
+    }
+    
+    # Clean response of command syntax
+    $result.Message = $Response -replace $pattern, ''
+    
+    return $result
+}
+
+function Send-ChatPrompt {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+        [hashtable]$Context = @{},
+        [hashtable]$Options = @{}
+    )
+    
+    try {
+        # Format prompt
+        $prompt = Format-ChatPrompt -UserMessage $Message -Context $Context
+        
+        # Default options for chat
+        $defaultOptions = @{
+            Temperature = 0.7
+            MaxTokens = 2000
+            TopP = 0.95
+        }
+        
+        # Merge with provided options
+        $finalOptions = $defaultOptions + $Options
+        
+        # Get response
+        $response = Send-TextPrompt -Prompt $prompt -Options $finalOptions
+        
+        # Process response
+        $processed = Process-ChatResponse -Response $response
+        
+        return $processed
+    }
+    catch {
+        Write-Error "Failed to process chat prompt: $_"
+        return @{
+            Message = "Error processing request: $_"
+            Commands = @()
+        }
+    }
+}
+
 # Export functions
 Export-ModuleMember -Function *

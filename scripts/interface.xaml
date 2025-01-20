@@ -39,12 +39,12 @@
             
             <!-- Tree View -->
             <DockPanel Grid.Column="0">
-                <TextBox DockPanel.Dock="Top" Watermark="Search nodes..." Margin="5"/>
+                <TextBox DockPanel.Dock="Top" Name="SearchBox" Watermark="Search nodes..." Margin="5"/>
                 <TreeView Name="DocumentTree"/>
             </DockPanel>
             
             <!-- Splitter -->
-            <GridSplitter Grid.Column="1" Width="5"/>
+            <GridSplitter Grid.Column="1" Width="5" ResizeDirection="Columns"/>
             
             <!-- Content Area -->
             <Grid Grid.Column="2">
@@ -57,15 +57,37 @@
                 <!-- Document Content -->
                 <DockPanel Grid.Row="0">
                     <ToolBar DockPanel.Dock="Top">
-                        <!-- Content tools -->
+                        <Button Name="BoldButton">Bold</Button>
+                        <Button Name="ItalicButton">Italic</Button>
+                        <Separator/>
+                        <Button Name="AddImageButton">Add Image</Button>
                     </ToolBar>
-                    <TextBox AcceptsReturn="True" TextWrapping="Wrap"/>
+                    <TextBox Name="ContentBox" 
+                            AcceptsReturn="True" 
+                            TextWrapping="Wrap"
+                            VerticalScrollBarVisibility="Auto"
+                            Margin="5"/>
                 </DockPanel>
                 
                 <!-- Chat Area -->
-                <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"/>
-                <DockPanel Grid.Row="2">
-                    <!-- Chat interface -->
+                <GridSplitter Grid.Row="1" Height="5" ResizeDirection="Rows" HorizontalAlignment="Stretch"/>
+                <DockPanel Grid.Row="2" Name="ChatPanel">
+                    <DockPanel DockPanel.Dock="Bottom" Height="32" Margin="5">
+                        <Button Name="ChatSendButton" 
+                                DockPanel.Dock="Right" 
+                                Width="80" 
+                                Margin="5,0,0,0">Send</Button>
+                        <TextBox Name="ChatInput" 
+                                Watermark="Type your message..." 
+                                VerticalContentAlignment="Center"/>
+                    </DockPanel>
+                    <TextBox Name="ChatOutput" 
+                            AcceptsReturn="True" 
+                            IsReadOnly="True" 
+                            TextWrapping="Wrap"
+                            VerticalScrollBarVisibility="Auto"
+                            Background="#F5F5F5"
+                            Margin="5"/>
                 </DockPanel>
             </Grid>
         </Grid>
