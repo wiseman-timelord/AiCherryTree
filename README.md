@@ -15,37 +15,45 @@ A Program that is an AI enhanced Tree Document. The user sets up the primary nod
 - Export and Import from Compressed file, this will require use of built in windows zip functionality on fast compression, format would be `.lightst0ne`, and upon import then foliage would be wiped and the file being imported would then be expanded to foliage.
 
 ### File Structure
-Oh yes, it's getting serious now...
+- Package Files...
 ```
-.
 ├── LightSt0ne.bat  # the user's entry point. 
 ├── installer.ps1  # Standalone script, separate from program - install the program and its requirements. 
 ├── launcher.ps1  # launch the program, entry point for other scripts.
 ├── scripts
 │   ├── interface.ps1  # interface code for `Avalonia UI` and any menus.
 │   ├── interface.xaml  # more interface code in a more efficient format (code reduction 80%).
-│   ├── utility.ps1  # the functions that dont fit better elsewhere. This should also contain `impexppsd1`.
-│   ├── texts.ps1  # the handling and prompting of text based model, as well as filtering input/output.
-│   ├── images.ps1  # the handling and prompting of image model, as well as filtering input.
+│   ├── utility.ps1  # the functions that dont fit better elsewhere. This should also contain `impexppsd1` functions, for read/write to psd1.
+│   ├── texts.ps1  # the, handling and filtering, of text based operations.
+│   ├── images.ps1  # the, handling and filtering, of image based operations.
 │   ├── internet.ps1  # the functions for web research, scraping.
 │   ├── prompts.ps1  # the functions for web research, scraping.
 │   ├── nodes.ps1  # the functions for node management.
+│   ├── model.ps1  # the script for model management.
+```
+- Files created by `.\installer.ps1`...
+```
+└── temp  #  container for temporary files, ie downloads, website data, images being processed
 ├── data  # Mostly, downloaded from internet or created by `installer.ps1` 
 │   ├── temporary.ps1  # location of ALL, globals, maps, lists, constants.
 │   ├── persistent.psd1  # persistent settings able to be configured in interface, as well as other critical persistent information.
 │   └── cudart-llama-bin-win-cu11.7  # contents of cudart-llama-bin-win-cu11.7-x64.zip
-│   └── backup.ls0  # the last good version of the tree document upon loading, as a fallback for corrupt load file (created by main program not installer) 
-│   └── default.ls0  # the default tree file, with critical information on using the program and its features. This is copied to `.\foliage\tree.ls0` upon first run.
+main program not installer) 
+│   └── default.ls0  # the default tree file, with critical information on using the program and its features. This is copied to `.\foliage\tree.ls0` upon first run of launcher.
 │   └── ImageMagick  # folder for installed ImageMagick files.
-├── foliage
+```
+- files, as required, created through, `.\launcher.ps1` and main program.
+```
+├── data
+│   └── backup.ls0  # the last good version of the tree document upon loading, as a fallback for corrupt load file 
+├── foliage  # Folder for storing the current tree document and its files.
 │   └── tree.ls0  # the single individual tree that the user will work with, loaded upon running the program, and then saved to when, exiting the program or auto-save.
 │   └── images  # the folder for the images indexed in the tree, files are saved in lossless jpg with a 8 character hash, ie `.\foliage\images\39ph490g.jpg`.  
 │   └── texts  # the folder for the pages indexed in the tree, files are saved in txt with a 8 character hash, ie `.\foliage\text\390ef94i.txt`.  
-└── temp  #  container for temporary files, ie downloads, website data, images being processed
 ```
 
 ## Requirements:
-- Windows - Designed and tested on windows 10.
+- Windows - Designed for Windows, tested on Windows 10.
 - Other Requirements - installed by the installer.
 
 ### Usage
