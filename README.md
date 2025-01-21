@@ -65,6 +65,7 @@ A Program that is an AI enhanced Tree Document. The user sets up the primary nod
 - Image processing by [ImageMagick](https://imagemagick.org/).
 - Multi-platform interfaces by [Avalonia UI](https://avaloniaui.net/).
 
+
 ### Later Development
 - Root node Prefab...
 ```
@@ -115,6 +116,7 @@ With the addition of a **personal organizer** functionality (even if implemented
      - Users can quickly retrieve information by navigating the tree or using search functions.
      - The AI can analyze the data to provide insights, trends, or recommendations.
 ```
+- later conversion into a program for doing the same thing, but to documents `LightPebb1e`, with more editing features and complexity, but for a linear document.
 
 ## Disclaimer:
 - Wiseman-Timelord does not consent to, authorize and/or empower any given documents created by other individuals using LightSt0ne, nay, for other individuals, authorise and empowere, their own works, for whatever, authority and powers, they have.
