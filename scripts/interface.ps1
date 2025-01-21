@@ -91,6 +91,39 @@ class AutoSaveManager {
     [void]Stop() { $this.Timer.Stop() }
 }
 
+class ChatState {
+    [bool]$IsProcessing
+    [string]$CurrentContext
+    [hashtable]$LastCommand
+    [System.Collections.Generic.List[hashtable]]$History
+    [int]$MaxMessageSize = 4000
+    
+    ChatState() {
+        $this.IsProcessing = $false
+        $this.CurrentContext = ""
+        $this.LastCommand = $null
+        $this.History = [System.Collections.Generic.List[hashtable]]::new()
+    }
+    
+    [void]AddMessage([string]$Role, [string]$Message) {
+        $this.History.Add(@{
+            Role = $Role
+            Message = $Message
+            Timestamp = Get-Date
+        })
+        
+        # Keep history size manageable
+        while ($this.History.Count > 100) {
+            $this.History.RemoveAt(0)
+        }
+    }
+    
+    [array]GetRecentHistory([int]$Count) {
+        $start = [Math]::Max(0, $this.History.Count - $Count)
+        return $this.History.GetRange($start, [Math]::Min($Count, $this.History.Count - $start))
+    }
+}
+
 # Main window class
 class MainWindow : Avalonia.Controls.Window {
     # UI Components
@@ -478,6 +511,293 @@ function Start-LightStoneInterface {
     catch {
         Write-Error "Failed to start interface: $_"
         return $false
+    }
+}
+
+# View Management
+class ViewManager {
+    [string]$CurrentView
+    [hashtable]$Panels
+    [hashtable]$GridColumns
+    [hashtable]$LastSizes
+
+    ViewManager() {
+        $this.CurrentView = "split"
+        $this.Panels = @{}
+        $this.GridColumns = @{}
+        $this.LastSizes = @{
+            tree = 300
+            chat = 300
+        }
+    }
+
+    [void]Initialize([Avalonia.Controls.Grid]$contentGrid) {
+        # Store column definitions
+        $this.GridColumns["tree"] = $contentGrid.ColumnDefinitions[0]
+        $this.GridColumns["splitter1"] = $contentGrid.ColumnDefinitions[1]
+        $this.GridColumns["content"] = $contentGrid.ColumnDefinitions[2]
+        $this.GridColumns["splitter2"] = $contentGrid.ColumnDefinitions[3]
+        $this.GridColumns["chat"] = $contentGrid.ColumnDefinitions[4]
+
+        # Store panel references
+        $this.Panels["tree"] = $contentGrid.Children | Where-Object { $_.Name -eq "DocumentTree" }
+        $this.Panels["content"] = $contentGrid.Children | Where-Object { $_.Name -eq "ContentBox" }
+        $this.Panels["chat"] = $contentGrid.Children | Where-Object { $_.Name -eq "ChatPanel" }
+    }
+
+    [void]SetView([string]$viewMode) {
+        $this.CurrentView = $viewMode
+        
+        switch ($viewMode) {
+            "split" {
+                $this.GridColumns["tree"].Width = [Avalonia.Controls.GridLength]::new($this.LastSizes.tree)
+                $this.GridColumns["splitter1"].Width = [Avalonia.Controls.GridLength]::new(3)
+                $this.GridColumns["content"].Width = [Avalonia.Controls.GridLength]::new(1, [Avalonia.Controls.GridUnitType]::Star)
+                $this.GridColumns["splitter2"].Width = [Avalonia.Controls.GridLength]::new(3)
+                $this.GridColumns["chat"].Width = [Avalonia.Controls.GridLength]::new($this.LastSizes.chat)
+            }
+            "tree" {
+                $this.StoreCurrentSizes()
+                $this.GridColumns["tree"].Width = [Avalonia.Controls.GridLength]::new(1, [Avalonia.Controls.GridUnitType]::Star)
+                $this.GridColumns["splitter1"].Width = [Avalonia.Controls.GridLength]::new(0)
+                $this.GridColumns["content"].Width = [Avalonia.Controls.GridLength]::new(0)
+                $this.GridColumns["splitter2"].Width = [Avalonia.Controls.GridLength]::new(0)
+                $this.GridColumns["chat"].Width = [Avalonia.Controls.GridLength]::new(0)
+            }
+            "chat" {
+                $this.StoreCurrentSizes()
+                $this.GridColumns["tree"].Width = [Avalonia.Controls.GridLength]::new(0)
+                $this.GridColumns["splitter1"].Width = [Avalonia.Controls.GridLength]::new(0)
+                $this.GridColumns["content"].Width = [Avalonia.Controls.GridLength]::new(0)
+                $this.GridColumns["splitter2"].Width = [Avalonia.Controls.GridLength]::new(0)
+                $this.GridColumns["chat"].Width = [Avalonia.Controls.GridLength]::new(1, [Avalonia.Controls.GridUnitType]::Star)
+            }
+        }
+
+        $this.UpdatePanelVisibility()
+    }
+
+    [void]StoreCurrentSizes() {
+        if ($this.CurrentView -eq "split") {
+            $this.LastSizes.tree = $this.GridColumns["tree"].Width.Value
+            $this.LastSizes.chat = $this.GridColumns["chat"].Width.Value
+        }
+    }
+
+    [void]UpdatePanelVisibility() {
+        foreach ($panel in $this.Panels.Values) {
+            $column = [Avalonia.Controls.Grid]::GetColumn($panel)
+            $width = $this.GridColumns[$column].Width.Value
+            $panel.IsVisible = $width -gt 0
+        }
+    }
+}
+
+# Progress Management
+class ProgressManager {
+    [Avalonia.Controls.ProgressBar]$ProgressBar
+    [Avalonia.Controls.TextBlock]$StatusText
+    [hashtable]$Tasks
+    [int]$ActiveTasks
+
+    ProgressManager([Avalonia.Controls.ProgressBar]$progress, [Avalonia.Controls.TextBlock]$status) {
+        $this.ProgressBar = $progress
+        $this.StatusText = $status
+        $this.Tasks = @{}
+        $this.ActiveTasks = 0
+    }
+
+    [string]StartTask([string]$description) {
+        $taskId = [Guid]::NewGuid().ToString()
+        $this.Tasks[$taskId] = @{
+            Description = $description
+            StartTime = Get-Date
+            Progress = 0
+        }
+        $this.ActiveTasks++
+        $this.UpdateUI()
+        return $taskId
+    }
+
+    [void]UpdateTask([string]$taskId, [int]$progress, [string]$status = $null) {
+        if ($this.Tasks.ContainsKey($taskId)) {
+            $this.Tasks[$taskId].Progress = $progress
+            if ($status) {
+                $this.Tasks[$taskId].Description = $status
+            }
+            $this.UpdateUI()
+        }
+    }
+
+    [void]CompleteTask([string]$taskId) {
+        if ($this.Tasks.ContainsKey($taskId)) {
+            $this.Tasks.Remove($taskId)
+            $this.ActiveTasks--
+            $this.UpdateUI()
+        }
+    }
+
+    [void]UpdateUI() {
+        if ($this.ActiveTasks -eq 0) {
+            $this.ProgressBar.IsVisible = $false
+            $this.StatusText.Text = "Ready"
+        } else {
+            $this.ProgressBar.IsVisible = $true
+            $totalProgress = ($this.Tasks.Values | Measure-Object -Property Progress -Average).Average
+            $this.ProgressBar.Value = $totalProgress
+
+            if ($this.Tasks.Count -eq 1) {
+                $task = $this.Tasks.Values | Select-Object -First 1
+                $this.StatusText.Text = "$($task.Description) - $($task.Progress)%"
+            } else {
+                $this.StatusText.Text = "$($this.ActiveTasks) tasks in progress - $([Math]::Round($totalProgress))%"
+            }
+        }
+    }
+}
+
+# Clipboard Management
+class ClipboardManager {
+    [object]$Clipboard
+    [hashtable]$History
+    [int]$MaxHistory
+
+    ClipboardManager([int]$maxHistory = 10) {
+        $this.Clipboard = [Avalonia.Input.Clipboard]::Instance
+        $this.History = @{}
+        $this.MaxHistory = $maxHistory
+    }
+
+    [void]SetText([string]$text) {
+        $this.Clipboard.SetTextAsync($text)
+        $this.AddToHistory($text)
+    }
+
+    [string]GetText() {
+        return $this.Clipboard.GetTextAsync().Result
+    }
+
+    [void]AddToHistory([string]$text) {
+        $timestamp = Get-Date
+        $this.History[$timestamp] = $text
+
+        # Maintain history limit
+        while ($this.History.Count -gt $this.MaxHistory) {
+            $oldest = $this.History.Keys | Sort-Object | Select-Object -First 1
+            $this.History.Remove($oldest)
+        }
+    }
+
+    [array]GetHistory() {
+        return $this.History.Keys | Sort-Object -Descending | ForEach-Object {
+            @{
+                Timestamp = $_
+                Text = $this.History[$_]
+            }
+        }
+    }
+}
+
+# Window State Management
+class WindowStateManager {
+    [Avalonia.Controls.Window]$Window
+    [hashtable]$LastPosition
+    [hashtable]$LastSize
+
+    WindowStateManager([Avalonia.Controls.Window]$window) {
+        $this.Window = $window
+        $this.LoadState()
+    }
+
+    [void]LoadState() {
+        $settings = Get-Settings
+        if ($settings.WindowState) {
+            $this.LastPosition = $settings.WindowState.Position
+            $this.LastSize = $settings.WindowState.Size
+        } else {
+            $this.LastPosition = @{ X = 100; Y = 100 }
+            $this.LastSize = @{ Width = 800; Height = 600 }
+        }
+    }
+
+    [void]SaveState() {
+        $state = @{
+            Position = @{
+                X = $this.Window.Position.X
+                Y = $this.Window.Position.Y
+            }
+            Size = @{
+                Width = $this.Window.Width
+                Height = $this.Window.Height
+            }
+        }
+
+        $settings = Get-Settings
+        $settings.WindowState = $state
+        Set-Settings -Settings $settings
+    }
+
+    [void]RestoreState() {
+        $this.Window.Position = [Avalonia.PixelPoint]::new(
+            $this.LastPosition.X,
+            $this.LastPosition.Y
+        )
+        $this.Window.Width = $this.LastSize.Width
+        $this.Window.Height = $this.LastSize.Height
+    }
+}
+
+# Update MainWindow class
+class MainWindow : Avalonia.Controls.Window {
+    # Additional properties
+    [ViewManager]$ViewManager
+    [ProgressManager]$ProgressManager
+    [ClipboardManager]$ClipboardManager
+    [WindowStateManager]$StateManager
+    
+    # Constructor update
+    MainWindow() {
+        # Initialize managers
+        $this.ViewManager = [ViewManager]::new()
+        $this.ClipboardManager = [ClipboardManager]::new()
+        $this.StateManager = [WindowStateManager]::new($this)
+        
+        # Load XAML and initialize components (existing code)
+        $xaml = [System.IO.File]::ReadAllText("$PSScriptRoot\interface.xaml")
+        $reader = [System.Xml.XmlReader]::Create([System.IO.StringReader]::new($xaml))
+        [Avalonia.Markup.Xaml.AvaloniaXamlLoader]::Load($this, $reader)
+        
+        $this.InitializeComponents()
+        $this.InitializeManagers()
+        $this.InitializeAutoSave()
+        $this.InitializeCommands()
+        
+        # Apply theme from settings
+        $settings = Get-Settings
+        $this.Theme = $settings.Theme
+        
+        # Restore window state
+        $this.StateManager.RestoreState()
+    }
+    
+    # Initialize managers
+    [void]InitializeManagers() {
+        # Initialize ViewManager
+        $contentGrid = $this.FindName("ContentGrid")
+        $this.ViewManager.Initialize($contentGrid)
+        
+        # Initialize ProgressManager
+        $progressBar = $this.FindName("StatusProgress")
+        $statusText = $this.FindName("StatusText")
+        $this.ProgressManager = [ProgressManager]::new($progressBar, $statusText)
+    }
+    
+    # Override OnClosed
+    [void]OnClosed() {
+        $this.StateManager.SaveState()
+        if ($this.AutoSaveManager) {
+            $this.AutoSaveManager.Stop()
+        }
     }
 }
 

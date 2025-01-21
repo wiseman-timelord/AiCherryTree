@@ -25,6 +25,273 @@ $global:ImageConfig = @{
     }
 }
 
+# Configuration
+$global:ImageTypes = @{
+    Scene = @{
+        Width = 200
+        Height = 200
+        Prompt = "A complete scene with background and environment"
+    }
+    Person = @{
+        Width = 100
+        Height = 200
+        Prompt = "A full-body character portrait"
+    }
+    Item = @{
+        Width = 100
+        Height = 100
+        Prompt = "A centered object or item"
+    }
+}
+
+# Image Generation Pipeline
+class ImageGenerationPipeline {
+    [string]$BasePrompt
+    [string]$Type
+    [hashtable]$Options
+    [string]$OutputPath
+    [object]$ProgressCallback
+
+    ImageGenerationPipeline([string]$prompt, [string]$type, [hashtable]$options, [string]$outputPath) {
+        $this.BasePrompt = $prompt
+        $this.Type = $type
+        $this.Options = $options
+        $this.OutputPath = $outputPath
+    }
+
+    [void]SetProgressCallback([object]$callback) {
+        $this.ProgressCallback = $callback
+    }
+
+    [hashtable]Process() {
+        try {
+            # Report progress
+            $this.ReportProgress(0, "Starting image generation")
+
+            # Step 1: Validate and enhance prompt
+            $this.ReportProgress(10, "Analyzing prompt")
+            $enhancedPrompt = $this.EnhancePrompt()
+
+            # Step 2: Generate base image
+            $this.ReportProgress(20, "Generating base image")
+            $baseImage = $this.GenerateImage($enhancedPrompt)
+            if (-not $baseImage) {
+                throw "Image generation failed"
+            }
+
+            # Step 3: Post-process image
+            $this.ReportProgress(60, "Post-processing image")
+            $processedImage = $this.PostProcessImage($baseImage)
+
+            # Step 4: Validate result
+            $this.ReportProgress(80, "Validating image")
+            if (-not (Test-GeneratedImage -Path $processedImage)) {
+                throw "Image validation failed"
+            }
+
+            # Step 5: Finalize
+            $this.ReportProgress(90, "Finalizing image")
+            $finalPath = $this.FinalizeImage($processedImage)
+
+            $this.ReportProgress(100, "Image generation complete")
+
+            return @{
+                Success = $true
+                Path = $finalPath
+                Prompt = $enhancedPrompt
+                Type = $this.Type
+                Metadata = Get-ImageMetadata -Path $finalPath
+            }
+        }
+        catch {
+            Write-Error "Image generation pipeline failed: $_"
+            return @{
+                Success = $false
+                Error = $_.Exception.Message
+            }
+        }
+    }
+
+    hidden [string]EnhancePrompt() {
+        $typePrompt = $global:ImageTypes[$this.Type].Prompt
+        $enhancedPrompt = @"
+$typePrompt
+Original request: $($this.BasePrompt)
+Style requirements:
+- High quality, detailed output
+- Clear composition and focus
+- Appropriate for $($this.Type.ToLower()) type image
+- Size: $($global:ImageTypes[$this.Type].Width)x$($global:ImageTypes[$this.Type].Height)
+"@
+        return $enhancedPrompt
+    }
+
+    hidden [string]GenerateImage([string]$prompt) {
+        # Get type configuration
+        $typeConfig = $global:ImageTypes[$this.Type]
+        
+        # Setup temporary path
+        $tempPath = New-TempFile -Extension ".png" -Prefix "gen_"
+        
+        # Configure model options
+        $modelOptions = @{
+            Width = $typeConfig.Width
+            Height = $typeConfig.Height
+            Steps = 4  # Flux specific
+            Seed = -1
+        }
+        
+        # Add custom options
+        foreach ($key in $this.Options.Keys) {
+            $modelOptions[$key] = $this.Options[$key]
+        }
+        
+        # Generate through model
+        $result = Invoke-GGUFModel -ModelContext $global:ModelState.ImageModel.Context `
+            -Prompt $prompt -Options $modelOptions
+        
+        if ($result) {
+            Move-Item $result $tempPath -Force
+            return $tempPath
+        }
+        
+        return $null
+    }
+
+    hidden [string]PostProcessImage([string]$imagePath) {
+        # Setup paths
+        $tempPath = New-TempFile -Extension ".png" -Prefix "proc_"
+        
+        # Get ImageMagick path
+        $magick = Join-Path $PSScriptRoot "..\data\ImageMagick\magick.exe"
+        
+        # Basic enhancement arguments
+        $args = @(
+            $imagePath,
+            "-quality", "95",
+            "-normalize",
+            "-unsharp", "0x0.75+0.75+0.008",
+            "-strip",
+            $tempPath
+        )
+        
+        # Process image
+        $process = Start-Process -FilePath $magick -ArgumentList $args -Wait -PassThru -NoNewWindow
+        if ($process.ExitCode -ne 0) {
+            throw "Post-processing failed"
+        }
+        
+        return $tempPath
+    }
+
+    hidden [string]FinalizeImage([string]$processedPath) {
+        # Copy to final location
+        Copy-Item $processedPath $this.OutputPath -Force
+        
+        # Cleanup temporary files
+        Remove-Item $processedPath -Force
+        
+        return $this.OutputPath
+    }
+
+    hidden [void]ReportProgress([int]$progress, [string]$status) {
+        if ($this.ProgressCallback) {
+            & $this.ProgressCallback $progress $status
+        }
+    }
+}
+
+# Image Validation
+function Test-GeneratedImage {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+    
+    try {
+        # Get image info
+        $info = Get-ImageMetadata -Path $Path
+        
+        # Basic validation checks
+        if ($info.Width -lt 50 -or $info.Height -lt 50) {
+            return $false
+        }
+        
+        # Check file size (shouldn't be too small)
+        $minSize = 1KB
+        if ($info.Size -lt $minSize) {
+            return $false
+        }
+        
+        # Validate format
+        $validFormats = @('PNG', 'JPEG', 'JPG')
+        if ($info.Format -notin $validFormats) {
+            return $false
+        }
+        
+        return $true
+    }
+    catch {
+        Write-Error "Image validation failed: $_"
+        return $false
+    }
+}
+
+# Main Generation Function
+function New-GeneratedImage {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Prompt,
+        [ValidateSet('Scene', 'Person', 'Item')]
+        [string]$Type = 'Scene',
+        [hashtable]$Options = @{},
+        [string]$OutputPath = $null
+    )
+    
+    try {
+        # Validate model state
+        if (-not (Test-ModelHealth -ModelType "Image")) {
+            throw "Image model not initialized"
+        }
+        
+        # Generate output path if not provided
+        if (-not $OutputPath) {
+            $hash = Get-RandomHash
+            $OutputPath = Join-Path $global:PATHS.ImagesDir "$hash.png"
+        }
+        
+        # Create pipeline
+        $pipeline = [ImageGenerationPipeline]::new($Prompt, $Type, $Options, $OutputPath)
+        
+        # Set progress callback if UI is available
+        if ($global:MainWindow.ProgressManager) {
+            $taskId = $global:MainWindow.ProgressManager.StartTask("Generating image")
+            $pipeline.SetProgressCallback({
+                param($progress, $status)
+                $global:MainWindow.ProgressManager.UpdateTask($taskId, $progress, $status)
+            })
+        }
+        
+        # Process pipeline
+        $result = $pipeline.Process()
+        
+        # Complete progress task if used
+        if ($taskId) {
+            $global:MainWindow.ProgressManager.CompleteTask($taskId)
+        }
+        
+        return $result
+    }
+    catch {
+        Write-Error "Image generation failed: $_"
+        return @{
+            Success = $false
+            Error = $_.Exception.Message
+        }
+    }
+}
+
+
 # Image Generation
 function New-AIImage {
     param(
@@ -384,19 +651,36 @@ function Add-ImageCache {
     }
 }
 
+# Cache Management
 function Clear-ImageCache {
+    param(
+        [switch]$Force,
+        [int]$MaxAge = 24  # hours
+    )
+    
     try {
-        $cacheFile = Join-Path $global:PATHS.TempDir "image_cache.json"
-        if (Test-Path $cacheFile) {
-            Remove-Item $cacheFile -Force
+        $count = 0
+        $maxTime = (Get-Date).AddHours(-$MaxAge)
+        
+        Get-ChildItem $global:PATHS.ImagesDir -File | ForEach-Object {
+            if ($Force -or $_.LastWriteTime -lt $maxTime) {
+                Remove-Item $_.FullName -Force
+                $count++
+            }
         }
         
-        Write-StatusMessage "Image cache cleared" "Success"
+        Write-StatusMessage "Cleared $count cached images" "Success"
+        return $count
     }
     catch {
         Write-Error "Failed to clear image cache: $_"
+        return -1
     }
 }
 
 # Export functions
-Export-ModuleMember -Function * -Variable ImageConfig
+Export-ModuleMember -Function @(
+    'New-GeneratedImage',
+    'Test-GeneratedImage',
+    'Clear-ImageCache'
+) -Variable 'ImageTypes'

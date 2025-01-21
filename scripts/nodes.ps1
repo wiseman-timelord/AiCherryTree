@@ -348,5 +348,396 @@ function Test-TreeStructure {
     }
 }
 
-# Export all functions
-Export-ModuleMember -Function *
+function Get-TreeData {
+    param([switch]$NoCache)
+    
+    try {
+        if (-not $NoCache -and $global:TempVars.LoadedTree) {
+            return $global:TempVars.LoadedTree
+        }
+        
+        $treePath = Join-Path $global:PATHS.TreeFile
+        if (Test-Path $treePath) {
+            $content = Get-Content $treePath -Raw
+            $tree = $content | ConvertFrom-Json -AsHashtable
+            $global:TempVars.LoadedTree = $tree
+            return $tree
+        }
+        
+        return $null
+    }
+    catch {
+        Write-Error "Failed to load tree data: $_"
+        return $null
+    }
+}
+
+function Save-TreeData {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Tree
+    )
+    
+    try {
+        $treePath = Join-Path $global:PATHS.TreeFile
+        $tree | ConvertTo-Json -Depth 10 | Set-Content $treePath -Force
+        $global:TempVars.LoadedTree = $Tree
+        return $true
+    }
+    catch {
+        Write-Error "Failed to save tree data: $_"
+        return $false
+    }
+}
+
+function Find-TreeNode {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Tree,
+        [Parameter(Mandatory = $true)]
+        [string]$NodeId
+    )
+    
+    function Search-Node {
+        param($Node)
+        
+        if ($Node.Id -eq $NodeId) {
+            return $Node
+        }
+        
+        if ($Node.Children) {
+            foreach ($child in $Node.Children) {
+                $result = Search-Node $child
+                if ($result) {
+                    return $result
+                }
+            }
+        }
+        
+        return $null
+    }
+    
+    return Search-Node $Tree.root
+}
+
+# Tree Data Management
+function Get-TreeData {
+    param([switch]$NoCache)
+    
+    try {
+        if (-not $NoCache -and $global:TempVars.LoadedTree) {
+            return $global:TempVars.LoadedTree
+        }
+        
+        if (-not $global:PATHS -or -not $global:PATHS.TreeFile) {
+            throw "Global paths not initialized"
+        }
+        
+        $treePath = $global:PATHS.TreeFile
+        if (Test-Path $treePath) {
+            # Acquire file lock
+            if (-not (Lock-File -Path $treePath -Owner "TreeLoader")) {
+                throw "Could not acquire file lock"
+            }
+            
+            try {
+                $content = Get-Content $treePath -Raw
+                if ([string]::IsNullOrEmpty($content)) {
+                    throw "Empty tree file"
+                }
+                
+                # Parse and validate tree structure
+                $tree = $content | ConvertFrom-Json -AsHashtable
+                if (-not (Test-TreeStructure -Tree $tree)) {
+                    throw "Invalid tree structure"
+                }
+                
+                $global:TempVars.LoadedTree = $tree
+                return $tree
+            }
+            finally {
+                # Release file lock
+                Unlock-File -Path $treePath
+            }
+        }
+        
+        # If no tree exists, create default
+        return Initialize-DefaultTree
+    }
+    catch {
+        Write-Error "Failed to load tree data: $_"
+        return $null
+    }
+}
+
+function Save-TreeData {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Tree
+    )
+    
+    try {
+        if (-not $global:PATHS -or -not $global:PATHS.TreeFile) {
+            throw "Global paths not initialized"
+        }
+        
+        # Validate tree structure before saving
+        if (-not (Test-TreeStructure -Tree $Tree)) {
+            throw "Invalid tree structure"
+        }
+        
+        $treePath = $global:PATHS.TreeFile
+        
+        # Create backup before saving
+        if (Test-Path $treePath) {
+            $backupPath = $global:PATHS.BackupFile
+            Copy-Item -Path $treePath -Destination $backupPath -Force
+        }
+        
+        # Acquire file lock
+        if (-not (Lock-File -Path $treePath -Owner "TreeSaver")) {
+            throw "Could not acquire file lock"
+        }
+        
+        try {
+            # Convert and save tree
+            $json = $Tree | ConvertTo-Json -Depth 10 -Compress:$false
+            Set-Content -Path $treePath -Value $json -Force
+            
+            # Update cache
+            $global:TempVars.LoadedTree = $Tree
+            $global:TempVars.LastSave = Get-Date
+            
+            return $true
+        }
+        finally {
+            # Release file lock
+            Unlock-File -Path $treePath
+        }
+    }
+    catch {
+        Write-Error "Failed to save tree data: $_"
+        
+        # Attempt to restore from backup if save failed
+        if (Test-Path $global:PATHS.BackupFile) {
+            try {
+                Copy-Item -Path $global:PATHS.BackupFile -Destination $treePath -Force
+                Write-StatusMessage "Restored from backup after failed save" "Warning"
+            }
+            catch {
+                Write-Error "Failed to restore from backup: $_"
+            }
+        }
+        
+        return $false
+    }
+}
+
+function Initialize-DefaultTree {
+    try {
+        $defaultTree = @{
+            version = "1.0"
+            created = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+            root = @{
+                id = "root"
+                title = "Root"
+                children = @()
+                created = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+                modified = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+                textHash = $null
+            }
+        }
+        
+        # Save default tree
+        if (Save-TreeData -Tree $defaultTree) {
+            return $defaultTree
+        }
+        throw "Failed to save default tree"
+    }
+    catch {
+        Write-Error "Failed to initialize default tree: $_"
+        return $null
+    }
+}
+
+function Find-TreeNode {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Tree,
+        [Parameter(Mandatory = $true)]
+        [string]$NodeId,
+        [switch]$IncludeParent
+    )
+    
+    try {
+        $parent = $null
+        
+        function Search-NodeRecursive {
+            param(
+                [Parameter(Mandatory = $true)]
+                [hashtable]$Node,
+                [hashtable]$ParentNode = $null
+            )
+            
+            if ($Node.Id -eq $NodeId) {
+                $parent = $ParentNode
+                return $Node
+            }
+            
+            if ($Node.Children) {
+                foreach ($child in $Node.Children) {
+                    $result = Search-NodeRecursive -Node $child -ParentNode $Node
+                    if ($result) {
+                        return $result
+                    }
+                }
+            }
+            
+            return $null
+        }
+        
+        $node = Search-NodeRecursive -Node $Tree.root
+        
+        if ($IncludeParent) {
+            return @{
+                Node = $node
+                Parent = $parent
+            }
+        }
+        
+        return $node
+    }
+    catch {
+        Write-Error "Failed to find node: $_"
+        return $null
+    }
+}
+
+function Test-NodeExists {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$NodeId,
+        [switch]$LoadFresh
+    )
+    
+    try {
+        $tree = Get-TreeData -NoCache:$LoadFresh
+        if (-not $tree) {
+            return $false
+        }
+        
+        $node = Find-TreeNode -Tree $tree -NodeId $NodeId
+        return $null -ne $node
+    }
+    catch {
+        Write-Error "Failed to check node existence: $_"
+        return $false
+    }
+}
+
+function Get-NodePath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$NodeId
+    )
+    
+    try {
+        $tree = Get-TreeData
+        if (-not $tree) {
+            return $null
+        }
+        
+        $path = New-Object System.Collections.Generic.List[string]
+        
+        function Find-PathRecursive {
+            param(
+                [Parameter(Mandatory = $true)]
+                [hashtable]$Node
+            )
+            
+            if ($Node.Id -eq $NodeId) {
+                return $true
+            }
+            
+            if ($Node.Children) {
+                foreach ($child in $Node.Children) {
+                    $path.Add($child.Id)
+                    if (Find-PathRecursive -Node $child) {
+                        return $true
+                    }
+                    $path.RemoveAt($path.Count - 1)
+                }
+            }
+            
+            return $false
+        }
+        
+        if (Find-PathRecursive -Node $tree.root) {
+            $path.Insert(0, $tree.root.Id)
+            return $path
+        }
+        
+        return $null
+    }
+    catch {
+        Write-Error "Failed to get node path: $_"
+        return $null
+    }
+}
+
+# Update Find-TreeNode callers
+function Remove-TreeNode {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$NodeId
+    )
+    
+    try {
+        $tree = Get-TreeData
+        if (-not $tree) {
+            throw "Failed to load tree"
+        }
+        
+        $nodeInfo = Find-TreeNode -Tree $tree -NodeId $NodeId -IncludeParent
+        if (-not $nodeInfo -or -not $nodeInfo.Node) {
+            throw "Node not found: $NodeId"
+        }
+        
+        # Don't allow removing root
+        if ($nodeInfo.Node.Id -eq "root") {
+            throw "Cannot remove root node"
+        }
+        
+        # Remove node from parent's children
+        $parentNode = $nodeInfo.Parent
+        $parentNode.Children = @($parentNode.Children | Where-Object { $_.Id -ne $NodeId })
+        
+        # Update parent's modified timestamp
+        $parentNode.Modified = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        
+        # Delete associated text content if exists
+        if ($nodeInfo.Node.TextHash) {
+            $textPath = Join-Path $global:PATHS.TextsDir "$($nodeInfo.Node.TextHash).txt"
+            if (Test-Path $textPath) {
+                Remove-Item $textPath -Force
+            }
+        }
+        
+        # Save updated tree
+        return (Save-TreeData -Tree $tree)
+    }
+    catch {
+        Write-Error "Failed to remove node: $_"
+        return $false
+    }
+}
+
+# Export new functions
+Export-ModuleMember -Function @(
+    'Get-TreeData',
+    'Save-TreeData',
+    'Initialize-DefaultTree',
+    'Find-TreeNode',
+    'Test-NodeExists',
+    'Get-NodePath'
+)
