@@ -38,7 +38,6 @@ A Program that is an AI enhanced Tree Document. The user sets up the primary nod
 │   ├── temporary.ps1  # location of ALL, globals, maps, lists, constants.
 │   ├── persistent.psd1  # persistent settings able to be configured in interface, as well as other critical persistent information.
 │   └── cudart-llama-bin-win-cu11.7  # contents of cudart-llama-bin-win-cu11.7-x64.zip
-main program not installer) 
 │   └── default.ls0  # the default tree file, with critical information on using the program and its features. This is copied to `.\foliage\tree.ls0` upon first run of launcher.
 │   └── ImageMagick  # folder for installed ImageMagick files.
 ```
