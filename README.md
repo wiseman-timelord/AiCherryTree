@@ -1,5 +1,5 @@
 # ![LightSt0ne](https://github.com/wiseman-timelord/LightSt0ne/blob/main/media/lightstone.png)
-Status: Planning
+Status: Alpha
 
 ### Description:
 A Program that is an AI enhanced Tree Document. The user sets up the primary nodes, some kind of basic structure, and possibly details some of the nodes, then the Ai is instructed through chat part of interface, what branches to expand upon and how, then the AI will be able to plan, then manage nodes, produce research, obtain materials, generate images/text, and fill out new nodes, and then the user will be able to inspect the relevant nodes, and further edit them, or instruct the AI to do so, or work on other stuff, etc. There is obviously the tree document editor, then the idea is the user will slide the proportions of the display between sides of, tree or ai chat, or something. Program Loads Tree on Open and Saves Tree on Close, and some kind of configurable autosave by default every 15 minutes. Its intended to create detailed nodes, max ~2300 text characters per page, so as to do it in 1 output, therein, generic images can be generated and specific versions of things in images are gained from internet, idea same with the text. 
