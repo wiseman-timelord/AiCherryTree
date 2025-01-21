@@ -1,127 +1,377 @@
-# scripts\MainWindow.xaml
-<#
-<Window xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="LightStone" Width="1200" Height="800">
-    <DockPanel>
-        <!-- Menu and Toolbar -->
-        <StackPanel DockPanel.Dock="Top">
-            <Menu>
-                <MenuItem Header="File">
-                    <MenuItem Header="New Node" Command="{Binding NewNodeCommand}"/>
-                    <MenuItem Header="Save" Command="{Binding SaveCommand}"/>
-                    <Separator/>
-                    <MenuItem Header="Exit" Command="{Binding ExitCommand}"/>
-                </MenuItem>
-                <!-- Other menus -->
-            </Menu>
-            <ToolBar>
-                <Button Command="{Binding NewNodeCommand}">New</Button>
-                <Button Command="{Binding SaveCommand}">Save</Button>
-                <Separator/>
-                <!-- Other tools -->
-            </ToolBar>
-        </StackPanel>
-        
-        <!-- Status Bar -->
-        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Height="25">
-            <TextBlock Name="StatusText" VerticalAlignment="Center" Margin="5"/>
-            <ProgressBar Name="StatusProgress" Width="100" Height="15" Margin="5"/>
-        </StackPanel>
-        
-        <!-- Main Content -->
-        <Grid>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="300"/>
-                <ColumnDefinition Width="5"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            
-            <!-- Tree View -->
-            <DockPanel Grid.Column="0">
-                <TextBox DockPanel.Dock="Top" Name="SearchBox" Watermark="Search nodes..." Margin="5"/>
-                <TreeView Name="DocumentTree"/>
-            </DockPanel>
-            
-            <!-- Splitter -->
-            <GridSplitter Grid.Column="1" Width="5" ResizeDirection="Columns"/>
-            
-            <!-- Content Area -->
-            <Grid Grid.Column="2">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="5"/>
-                    <RowDefinition Height="200"/>
-                </Grid.RowDefinitions>
-                
-                <!-- Document Content -->
-                <DockPanel Grid.Row="0">
-                    <ToolBar DockPanel.Dock="Top">
-                        <Button Name="BoldButton">Bold</Button>
-                        <Button Name="ItalicButton">Italic</Button>
-                        <Separator/>
-                        <Button Name="AddImageButton">Add Image</Button>
-                    </ToolBar>
-                    <TextBox Name="ContentBox" 
-                            AcceptsReturn="True" 
-                            TextWrapping="Wrap"
-                            VerticalScrollBarVisibility="Auto"
-                            Margin="5"/>
-                </DockPanel>
-                
-                <!-- Chat Area -->
-                <GridSplitter Grid.Row="1" Height="5" ResizeDirection="Rows" HorizontalAlignment="Stretch"/>
-                <DockPanel Grid.Row="2" Name="ChatPanel">
-                    <DockPanel DockPanel.Dock="Bottom" Height="32" Margin="5">
-                        <Button Name="ChatSendButton" 
-                                DockPanel.Dock="Right" 
-                                Width="80" 
-                                Margin="5,0,0,0">Send</Button>
-                        <TextBox Name="ChatInput" 
-                                Watermark="Type your message..." 
-                                VerticalContentAlignment="Center"/>
-                    </DockPanel>
-                    <TextBox Name="ChatOutput" 
-                            AcceptsReturn="True" 
-                            IsReadOnly="True" 
-                            TextWrapping="Wrap"
-                            VerticalScrollBarVisibility="Auto"
-                            Background="#F5F5F5"
-                            Margin="5"/>
-                </DockPanel>
-            </Grid>
-        </Grid>
-    </DockPanel>
-</Window>
-#>
+# .\scripts\interface.ps1
 
-# interface.ps1
-using namespace System.Windows
+# Import required modules
+Import-Module "$PSScriptRoot\utility.ps1"
+Import-Module "$PSScriptRoot\model.ps1"
+Import-Module "$PSScriptRoot\texts.ps1"
+Import-Module "$PSScriptRoot\nodes.ps1"
+Import-Module "$PSScriptRoot\prompts.ps1"
 
-# Load XAML and create window
+# Add Avalonia assemblies
+Add-Type -Path ".\lib\Avalonia.dll"
+Add-Type -Path ".\lib\Avalonia.Desktop.dll"
+Add-Type -Path ".\lib\Avalonia.Controls.dll"
+
+# Initialize settings
+$settings = Get-Settings
+$global:UIConfig = @{
+    AutoSave = $settings.AutoBackup
+    AutoSaveInterval = $settings.AutoSaveInterval
+    LastResponse = $null
+    IsProcessing = $false
+    CurrentView = "split"  # split, tree, or chat
+}
+
+# Event handlers
+$global:UIEvents = @{
+    NodeOperations = @{
+        OnSelect = { 
+            param($Node) 
+            $global:TempVars.CurrentNode = $Node
+            Update-ContentPanel
+            
+            # Update chat context
+            $global:MainWindow.ChatState.CurrentContext = Get-NodeContext -NodeId $Node.Id
+        }
+        OnCreate = { 
+            param($ParentNode, $Title = "New Node")
+            $newNode = New-TreeNode -Title $Title -ParentId $ParentNode.Id
+            Save-TreeNode -Node $newNode
+            Update-TreeView
+            Show-StatusMessage "Node created successfully" "Success"
+            return $newNode
+        }
+        OnDelete = {
+            param($Node)
+            if (Show-Confirmation "Delete Node" "Are you sure you want to delete this node?") {
+                Remove-TreeNode -NodeId $Node.Id
+                Update-TreeView
+                Show-StatusMessage "Node deleted" "Success"
+                return $true
+            }
+            return $false
+        }
+        OnEdit = {
+            param($Node, $Content)
+            if (Test-ContentSafety -Content $Content) {
+                $Node.Content = Format-NodeContent -Content $Content
+                Save-TreeNode -Node $Node
+                Show-StatusMessage "Changes saved" "Success"
+            }
+            else {
+                Show-StatusMessage "Content contains unsafe patterns" "Error"
+            }
+        }
+    }
+    Chat = @{
+        OnMessageReceived = {
+            param($Message)
+            $global:MainWindow.ProcessChatMessage($Message)
+        }
+        OnCommandExecuted = {
+            param($Command, $Result)
+            $global:MainWindow.HandleCommandResult($Command, $Result)
+        }
+    }
+    Search = @{
+        OnChange = { 
+            param($Text) 
+            Update-TreeViewFilter -Filter $Text 
+        }
+    }
+}
+
+# Main window class
 class MainWindow : Avalonia.Controls.Window {
+    # UI Components
     $TreeView
+    $SearchBox
     $ContentBox
+    $ChatPanel
+    $ChatInput
+    $ChatOutput
+    $ChatSendButton
+    $StatusText
+    $StatusProgress
+    $ViewToggle
+    $SplitPanel
+    
+    # State
     $AutoSaveManager
+    [ChatState]$ChatState
     
     MainWindow() {
-        $xaml = [System.IO.File]::ReadAllText("$PSScriptRoot\MainWindow.xaml")
+        # Load XAML
+        $xaml = [System.IO.File]::ReadAllText("$PSScriptRoot\interface.xaml")
         $reader = [System.Xml.XmlReader]::Create([System.IO.StringReader]::new($xaml))
-        [Avalonia.Application]::Current.LoadComponent($this, $reader)
+        [Avalonia.Markup.Xaml.AvaloniaXamlLoader]::Load($this, $reader)
         
+        $this.ChatState = [ChatState]::new()
         $this.InitializeComponents()
         $this.InitializeAutoSave()
+        $this.InitializeCommands()
+        
+        # Apply theme from settings
+        $settings = Get-Settings
+        $this.Theme = $settings.Theme
     }
     
     [void]InitializeComponents() {
+        # Get controls
         $this.TreeView = $this.FindName("DocumentTree")
+        $this.SearchBox = $this.FindName("SearchBox")
         $this.ContentBox = $this.FindName("ContentBox")
+        $this.ChatPanel = $this.FindName("ChatPanel")
+        $this.ChatInput = $this.FindName("ChatInput")
+        $this.ChatOutput = $this.FindName("ChatOutput")
+        $this.ChatSendButton = $this.FindName("ChatSendButton")
+        $this.StatusText = $this.FindName("StatusText")
+        $this.StatusProgress = $this.FindName("StatusProgress")
+        $this.ViewToggle = $this.FindName("ViewToggle")
+        $this.SplitPanel = $this.FindName("SplitPanel")
         
-        # Add event handlers
-        $this.TreeView.SelectionChanged += { $global:UIEvents.OnNodeSelect.Invoke($_.AddedItems[0]) }
+        # Tree and Content handlers
+        $this.TreeView.SelectionChanged += { 
+            $global:UIEvents.NodeOperations.OnSelect.Invoke($_.AddedItems[0]) 
+        }
         $this.ContentBox.TextChanged += { 
             if ($global:TempVars.CurrentNode) {
-                $global:UIEvents.OnNodeEdit.Invoke($global:TempVars.CurrentNode, $_.Text)
+                $global:UIEvents.NodeOperations.OnEdit.Invoke(
+                    $global:TempVars.CurrentNode, 
+                    $_.Text
+                )
+            }
+        }
+        
+        # Search handler
+        $this.SearchBox.TextChanged += { 
+            $global:UIEvents.Search.OnChange.Invoke($_.Text) 
+        }
+        
+        # Chat handlers
+        $this.ChatSendButton.Click += { 
+            $this.ProcessChatMessage($this.ChatInput.Text) 
+        }
+        $this.ChatInput.KeyDown += {
+            param($sender, $e)
+            if ($e.Key -eq [Avalonia.Input.Key]::Enter -and -not $e.KeyModifiers) {
+                $this.ProcessChatMessage($this.ChatInput.Text)
+                $e.Handled = $true
+            }
+        }
+        
+        # View toggle handler
+        $this.ViewToggle.SelectionChanged += {
+            $this.UpdateViewMode($_.AddedItems[0].Tag)
+        }
+        
+        # Initialize chat
+        $this.ChatOutput.IsReadOnly = $true
+        $this.ChatOutput.TextWrapping = [Avalonia.Media.TextWrapping]::Wrap
+        $this.AppendChatMessage("System", "Chat interface initialized. Ready to assist.")
+    }
+    
+	[void]ProcessChatMessage([string]$Message) {
+		if ($this.ChatState.IsProcessing -or [string]::IsNullOrWhiteSpace($Message)) {
+			return
+		}
+		
+		# Validate message size
+		if ($Message.Length -gt $this.ChatState.MaxMessageSize) {
+			$this.AppendChatMessage("System", "Message too long. Please send a shorter message.")
+			return
+		}
+		
+		try {
+			$this.ChatState.IsProcessing = $true
+			$this.UpdateUIState($true)
+			
+			# Add user message
+			$this.AppendChatMessage("User", $Message)
+			$this.ChatInput.Text = ""
+			
+			# Build context
+			$context = @{
+				CurrentNode = $global:TempVars.CurrentNode
+				NodeContext = $this.ChatState.CurrentContext
+				LastCommand = $this.ChatState.LastCommand
+				ChatHistory = $this.ChatState.GetRecentHistory(5)
+			}
+			
+			# Validate context
+			if ($context.CurrentNode -and -not $context.NodeContext) {
+				$context.NodeContext = Get-NodeContext -NodeId $context.CurrentNode.Id
+			}
+			
+			# Get AI response
+			$result = Send-ChatPrompt -Message $Message -Context $context
+			
+			if (-not $result) {
+				throw "Failed to get AI response"
+			}
+			
+			# Process response
+			$this.AppendChatMessage("Assistant", $result.Message)
+			
+			# Handle commands
+			if ($result.Commands) {
+				foreach ($command in $result.Commands) {
+					$this.ExecuteAICommand($command)
+				}
+				
+				# Update state
+				$this.ChatState.LastCommand = $result.Commands | Select-Object -Last 1
+			}
+		}
+		catch {
+			$this.AppendChatMessage("System", "Error: $_")
+		}
+		finally {
+			$this.ChatState.IsProcessing = $false
+			$this.UpdateUIState($false)
+		}
+	}
+    
+    [void]AppendChatMessage([string]$Role, [string]$Message) {
+        $timestamp = Get-Date -Format "HH:mm:ss"
+        $formattedMessage = "[$timestamp] $Role:`n$Message`n`n"
+        
+        $this.ChatOutput.Text += $formattedMessage
+        $this.ChatOutput.CaretIndex = $this.ChatOutput.Text.Length
+        $this.ChatOutput.ScrollToEnd()
+        
+        $this.ChatState.AddMessage($Role, $Message)
+    }
+    
+	[void]ExecuteAICommand([hashtable]$Command) {
+		if (-not $Command -or -not $Command.Type) {
+			$this.AppendChatMessage("System", "Invalid command received")
+			return
+		}
+		
+		try {
+			$this.AppendChatMessage("System", "Executing command: $($Command.Type)")
+			
+			switch ($Command.Type) {
+				"CreateNode" {
+					if (-not $Command.Parameters -or $Command.Parameters.Count -eq 0) {
+						throw "Missing title parameter"
+					}
+					
+					$title = $Command.Parameters[0]
+					$newNode = $global:UIEvents.NodeOperations.OnCreate.Invoke(
+						$global:TempVars.CurrentNode, 
+						$title
+					)
+					
+					if ($newNode) {
+						$global:TempVars.CurrentNode = $newNode
+						Update-ContentPanel
+						$this.ChatState.CurrentContext = Get-NodeContext -NodeId $newNode.Id
+					}
+				}
+				
+				"UpdateNode" {
+					if (-not $global:TempVars.CurrentNode) {
+						throw "No node selected"
+					}
+					
+					if (-not $Command.Parameters -or $Command.Parameters.Count -eq 0) {
+						throw "Missing content parameter"
+					}
+					
+					$content = $Command.Parameters[0]
+					$global:UIEvents.NodeOperations.OnEdit.Invoke(
+						$global:TempVars.CurrentNode, 
+						$content
+					)
+					
+					# Update context after content change
+					$this.ChatState.CurrentContext = Get-NodeContext -NodeId $global:TempVars.CurrentNode.Id
+				}
+				
+				"DeleteNode" {
+					if (-not $global:TempVars.CurrentNode) {
+						throw "No node selected"
+					}
+					
+					if ($global:UIEvents.NodeOperations.OnDelete.Invoke($global:TempVars.CurrentNode)) {
+						$this.ChatState.CurrentContext = ""
+						$global:TempVars.CurrentNode = $null
+					}
+				}
+				
+				"GenerateContent" {
+					if (-not $Command.Parameters -or $Command.Parameters.Count -lt 2) {
+						throw "Missing type or prompt parameters"
+					}
+					
+					$type = $Command.Parameters[0]
+					$prompt = $Command.Parameters[1]
+					
+					switch ($type) {
+						"Text" {
+							if (-not $global:TempVars.CurrentNode) {
+								throw "No node selected for content generation"
+							}
+							
+							$content = Send-TextPrompt -Prompt $prompt -Options @{
+								Temperature = 0.7
+								MaxTokens = 2000
+							}
+							
+							if ($content) {
+								$global:UIEvents.NodeOperations.OnEdit.Invoke(
+									$global:TempVars.CurrentNode, 
+									$content
+								)
+							}
+						}
+						"Image" {
+							$this.AppendChatMessage("System", "Image generation not yet implemented")
+						}
+						default {
+							throw "Unknown content type: $type"
+						}
+					}
+				}
+				
+				default {
+					throw "Unknown command type: $($Command.Type)"
+				}
+			}
+			
+			$this.AppendChatMessage("System", "Command completed successfully")
+		}
+		catch {
+			$this.AppendChatMessage("System", "Command failed: $_")
+		}
+	}
+    
+    [void]UpdateUIState([bool]$Processing) {
+        $this.ChatSendButton.IsEnabled = -not $Processing
+        $this.ChatInput.IsEnabled = -not $Processing
+        $this.StatusProgress.IsVisible = $Processing
+    }
+    
+    [void]UpdateViewMode([string]$Mode) {
+        $global:UIConfig.CurrentView = $Mode
+        
+        switch ($Mode) {
+            "split" {
+                $this.TreeView.IsVisible = $true
+                $this.ChatPanel.IsVisible = $true
+                $this.SplitPanel.IsVisible = $true
+            }
+            "tree" {
+                $this.TreeView.IsVisible = $true
+                $this.ChatPanel.IsVisible = $false
+                $this.SplitPanel.IsVisible = $false
+            }
+            "chat" {
+                $this.TreeView.IsVisible = $false
+                $this.ChatPanel.IsVisible = $true
+                $this.SplitPanel.IsVisible = $false
             }
         }
     }
@@ -134,4 +384,218 @@ class MainWindow : Avalonia.Controls.Window {
         })
         $this.AutoSaveManager.Start()
     }
+    
+    [void]InitializeCommands() {
+        # Menu commands
+        $this.FindName("NewNodeCommand").Execute += { 
+            $global:UIEvents.NodeOperations.OnCreate.Invoke(
+                $global:TempVars.CurrentNode
+            ) 
+        }
+        $this.FindName("SaveCommand").Execute += { 
+            if ($global:TempVars.CurrentNode) {
+                Save-TreeNode -Node $global:TempVars.CurrentNode
+                Show-StatusMessage "Saved successfully" "Success"
+            }
+        }
+        $this.FindName("ExitCommand").Execute += { 
+            $this.Close() 
+        }
+    }
 }
+
+# UI utility functions
+function Show-Confirmation {
+    param(
+        [string]$Title,
+        [string]$Message
+    )
+    
+    $result = $false
+    $dialog = $global:MainWindow.FindName("ConfirmationDialog")
+    $dialog.Title = $Title
+    $dialog.FindName("MessageText").Text = $Message
+    
+    $dialog.FindName("OKButton").Click += { 
+        $result = $true
+        $dialog.Close() 
+    }
+    $dialog.FindName("CancelButton").Click += { 
+        $dialog.Close() 
+    }
+    
+    $dialog.ShowDialog($global:MainWindow)
+    return $result
+}
+
+function Show-StatusMessage {
+    param(
+        [string]$Message,
+        [string]$Type = "Info"
+    )
+    
+    $color = switch ($Type) {
+        "Success" { "Green" }
+        "Warning" { "Orange" }
+        "Error" { "Red" }
+        default { "Black" }
+    }
+    
+    $global:MainWindow.StatusText.Text = $Message
+    $global:MainWindow.StatusText.Foreground = [Avalonia.Media.SolidColorBrush]::Parse($color)
+}
+
+function Show-Progress {
+    param(
+        [int]$Value,
+        [string]$Message
+    )
+    
+    $global:MainWindow.StatusProgress.Value = $Value
+    $global:MainWindow.StatusProgress.IsVisible = $Value -gt 0 -and $Value -lt 100
+    
+    if ($Message) {
+        Show-StatusMessage $Message
+    }
+}
+
+# Tree View Management
+function Update-TreeView {
+    try {
+        $treeData = Get-TreeData
+        if (-not $treeData) {
+            Show-StatusMessage "Failed to load tree data" "Error"
+            return
+        }
+        
+        $items = ConvertTo-TreeViewItems $treeData.root
+        $global:MainWindow.TreeView.Items = $items
+        Show-StatusMessage "Tree view updated" "Success"
+    }
+    catch {
+        Show-StatusMessage "Failed to update tree view: $_" "Error"
+    }
+}
+
+function Update-TreeViewFilter {
+    param([string]$Filter)
+    
+    try {
+        if ([string]::IsNullOrWhiteSpace($Filter)) {
+            Update-TreeView
+            return
+        }
+        
+        $treeData = Get-TreeData
+        $filteredItems = Convert-TreeNodeToViewModel $treeData.root | 
+            Where-Object { $_.Title -like "*$Filter*" }
+            
+        $global:MainWindow.TreeView.Items = $filteredItems
+        Show-StatusMessage "Filter applied: $Filter" "Info"
+    }
+    catch {
+        Show-StatusMessage "Failed to apply filter: $_" "Error"
+    }
+}
+
+function Update-ContentPanel {
+    if (-not $global:TempVars.CurrentNode) {
+        $global:MainWindow.ContentBox.Text = ""
+        return
+    }
+    
+    try {
+        $content = Get-TreeNodeContent $global:TempVars.CurrentNode.TextHash
+        if ($content) {
+            $global:MainWindow.ContentBox.Text = $content
+            Show-StatusMessage "Content loaded" "Success"
+        }
+        else {
+            $global:MainWindow.ContentBox.Text = ""
+            Show-StatusMessage "No content available" "Info"
+        }
+    }
+    catch {
+        Show-StatusMessage "Failed to load content: $_" "Error"
+        $global:MainWindow.ContentBox.Text = ""
+    }
+}
+
+# Initialization Functions
+function Initialize-AvaloniaUI {
+    try {
+        Write-StatusMessage "Initializing Avalonia UI..." "Info"
+        
+        $appBuilder = [Avalonia.AppBuilder]::Configure[[LightStoneApp]]()
+            .UsePlatformDetect()
+            .LogToTrace()
+            
+        $result = $appBuilder.StartWithClassicDesktopLifetime(@())
+        if ($result) {
+            Write-StatusMessage "Avalonia UI initialized" "Success"
+        }
+        return $result
+    }
+    catch {
+        Write-Error "Failed to initialize Avalonia UI: $_"
+        return $false
+    }
+}
+
+function Start-LightStoneInterface {
+    param([hashtable]$Config)
+    
+    try {
+        Write-StatusMessage "Starting LightStone interface..." "Info"
+        
+        # Initialize UI framework
+        if (-not (Initialize-AvaloniaUI)) {
+            throw "Failed to initialize Avalonia UI"
+        }
+        
+        # Create and configure main window
+        $global:MainWindow = [MainWindow]::new()
+        
+        # Load initial tree data
+        Update-TreeView
+        
+        # Show window
+        $global:MainWindow.Show()
+        
+        Write-StatusMessage "Interface started successfully" "Success"
+        return $true
+    }
+    catch {
+        Write-Error "Failed to start interface: $_"
+        return $false
+    }
+}
+
+# Auto-save manager class
+class AutoSaveManager {
+    [System.Timers.Timer]$Timer
+    [scriptblock]$SaveCallback
+    
+    AutoSaveManager([scriptblock]$callback) {
+        $settings = Get-Settings
+        $this.SaveCallback = $callback
+        $this.Timer = [System.Timers.Timer]::new($settings.AutoSaveInterval * 1000)
+        $this.Timer.Elapsed += {
+            if ($settings.AutoBackup) {
+                try {
+                    & $this.SaveCallback
+                    Show-StatusMessage "Auto-saved" "Success"
+                }
+                catch {
+                    Show-StatusMessage "Auto-save failed: $_" "Error"
+                }
+            }
+        }
+    }
+    
+    [void]Start() { $this.Timer.Start() }
+    [void]Stop() { $this.Timer.Stop() }
+}
+
+# Export functions
+Export-ModuleMember -Function *

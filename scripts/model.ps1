@@ -11,191 +11,164 @@ $global:ModelState = @{
         LastError = $null
         Config = $null
         Process = $null
+        Handle = $null
     }
     ImageModel = @{
         Initialized = $false
         LastError = $null
         Config = $null
         Process = $null
+        Handle = $null
     }
 }
 
-# GGUF Model Functions
-function Get-GGUFInfo {
+# LlamaBox Integration
+function Initialize-LlamaBox {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Path
+        [string]$ModelPath,
+        [hashtable]$Config
     )
     
     try {
-        # Read first 8 bytes to verify GGUF magic
-        $bytes = [System.IO.File]::ReadAllBytes($Path)
-        $magic = [System.Text.Encoding]::ASCII.GetString($bytes[0..3])
+        $settings = Get-Settings
+        $llamaBoxPath = Join-Path $PSScriptRoot "..\data\llama-box.exe"
         
-        if ($magic -ne "GGUF") {
-            throw "Not a valid GGUF model file"
+        if (-not (Test-Path $llamaBoxPath)) {
+            throw "LlamaBox executable not found: $llamaBoxPath"
         }
         
-        # Parse version (next 4 bytes as uint32)
-        $version = [BitConverter]::ToUInt32($bytes[4..7], 0)
+        if (-not (Test-Path $ModelPath)) {
+            throw "Model file not found: $ModelPath"
+        }
+        
+        # Default configuration
+        $defaultConfig = @{
+            ThreadCount = -1  # Auto-detect
+            ContextSize = 32768
+            BatchSize = 4096
+            Temperature = 0.8
+            TopK = 40
+            TopP = 0.9
+            RepeatPenalty = 1.1
+            GpuLayers = 32
+        }
+        
+        # Merge with provided config
+        $finalConfig = $defaultConfig
+        if ($Config) {
+            foreach ($key in $Config.Keys) {
+                $finalConfig[$key] = $Config[$key]
+            }
+        }
+        
+        # Build arguments
+        $args = @(
+            "--model", $ModelPath,
+            "--ctx-size", $finalConfig.ContextSize,
+            "--batch-size", $finalConfig.BatchSize,
+            "--threads", $finalConfig.ThreadCount,
+            "--gpu-layers", $finalConfig.GpuLayers,
+            "--temp", $finalConfig.Temperature,
+            "--top-k", $finalConfig.TopK,
+            "--top-p", $finalConfig.TopP,
+            "--repeat-penalty", $finalConfig.RepeatPenalty,
+            "--interactive"  # Enable interactive mode for continuous use
+        )
+        
+        # Start LlamaBox process
+        $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $processInfo.FileName = $llamaBoxPath
+        $processInfo.Arguments = $args -join " "
+        $processInfo.UseShellExecute = $false
+        $processInfo.RedirectStandardInput = $true
+        $processInfo.RedirectStandardOutput = $true
+        $processInfo.RedirectStandardError = $true
+        $processInfo.CreateNoWindow = $true
+        
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $processInfo
+        $process.Start()
+        
+        # Wait for initialization
+        $ready = $false
+        $timeout = [DateTime]::Now.AddSeconds(30)
+        while (-not $ready -and [DateTime]::Now -lt $timeout) {
+            $line = $process.StandardOutput.ReadLine()
+            if ($line -match "Interactive mode") {
+                $ready = $true
+            }
+            if ($line -match "error|fatal|failed") {
+                throw "LlamaBox initialization failed: $line"
+            }
+        }
+        
+        if (-not $ready) {
+            throw "LlamaBox initialization timed out"
+        }
         
         return @{
-            Path = $Path
-            Version = $version
-            Size = (Get-Item $Path).Length
-            Valid = $true
+            Process = $process
+            Config = $finalConfig
         }
     }
     catch {
-        Write-Error "Failed to get GGUF info: $_"
+        Write-Error "Failed to initialize LlamaBox: $_"
         return $null
     }
 }
 
-function Invoke-FluxModel {
+function Send-LlamaBoxPrompt {
     param(
+        [Parameter(Mandatory = $true)]
+        [System.Diagnostics.Process]$Process,
         [Parameter(Mandatory = $true)]
         [string]$Prompt,
-        [Parameter(Mandatory = $true)]
-        [string]$OutputPath,
-        [string]$ModelPath,
-        [int]$Width = 512,
-        [int]$Height = 512,
-        [int]$Steps = 4,
-        [float]$CFGScale = 7.5,
-        [int]$Seed = -1,
-        [int]$NumThreads = -1,
-        [int]$BatchSize = 1
+        [hashtable]$Options = @{},
+        [switch]$Stream
     )
     
     try {
-        # Validate model
-        if (-not (Test-GGUFModel -Path $ModelPath)) {
-            throw "Invalid or missing GGUF model"
+        # Ensure process is running
+        if ($Process.HasExited) {
+            throw "LlamaBox process has exited"
         }
         
-        # Load CLBlast DLL for GPU acceleration
-        $clblastPath = Join-Path $PSScriptRoot "..\data\clblast.dll"
-        if (Test-Path $clblastPath) {
-            Add-Type -Path $clblastPath
-        }
+        # Send prompt
+        $Process.StandardInput.WriteLine($Prompt)
+        $Process.StandardInput.WriteLine("<|end|>")  # Signal end of prompt
         
-        # Prepare model parameters
-        $modelParams = @{
-            prompt = $Prompt
-            width = $Width
-            height = $Height
-            steps = $Steps
-            cfg_scale = $CFGScale
-            seed = $Seed
-            threads = $NumThreads
-            batch_size = $BatchSize
-        }
+        # Read response
+        $response = ""
+        $reading = $true
         
-        # Convert parameters to format expected by GGUF
-        $jsonParams = ConvertTo-Json $modelParams -Compress
-        
-        # Allocate unmanaged memory for image generation
-        $imageData = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($Width * $Height * 3)
-        
-        try {
-            # Initialize model
-            $handle = Initialize-GGUFModel -Path $ModelPath
-            if (-not $handle) {
-                throw "Failed to initialize GGUF model"
-            }
+        while ($reading) {
+            $line = $Process.StandardOutput.ReadLine()
             
-            # Generate image
-            $result = Generate-GGUFImage -Handle $handle -Params $jsonParams -Output $imageData
-            if (-not $result) {
-                throw "Image generation failed"
+            # Check for end marker or error
+            if ($line -eq "<|end|>") {
+                $reading = $false
             }
-            
-            # Save image
-            Save-ImageData -Data $imageData -Width $Width -Height $Height -Path $OutputPath
-            
-            return $true
+            elseif ($line -match "^error:|^fatal:") {
+                throw "LlamaBox error: $line"
+            }
+            else {
+                if ($Stream) {
+                    Write-Output $line
+                }
+                else {
+                    $response += "$line`n"
+                }
+            }
         }
-        finally {
-            # Clean up
-            if ($handle) {
-                Close-GGUFModel -Handle $handle
-            }
-            if ($imageData) {
-                [System.Runtime.InteropServices.Marshal]::FreeHGlobal($imageData)
-            }
+        
+        if (-not $Stream) {
+            return $response.Trim()
         }
     }
     catch {
-        Write-Error "Failed to invoke Flux model: $_"
-        return $false
-    }
-}
-
-function Test-GGUFModel {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path
-    )
-    
-    try {
-        # Check file existence
-        if (-not (Test-Path $Path)) {
-            return $false
-        }
-        
-        # Validate GGUF format
-        $info = Get-GGUFInfo -Path $Path
-        return $info -and $info.Valid
-    }
-    catch {
-        Write-Error "Failed to test GGUF model: $_"
-        return $false
-    }
-}
-
-# Initialize GPU Environment
-function Initialize-GPUEnvironment {
-    param([hashtable]$CustomConfig = @{})
-    
-    try {
-        Write-StatusMessage "Initializing GPU environment..." "Info"
-        
-        # Set environment variables
-        $env:CUDA_VISIBLE_DEVICES = "0"
-        $env:GGML_OPENCL_PLATFORM = "0"
-        $env:GGML_OPENCL_DEVICE = "0"
-        
-        # Load settings
-        $settings = Get-Settings
-        $gpuConfig = $settings.GPU
-        
-        # Merge with custom config
-        foreach ($key in $CustomConfig.Keys) {
-            $gpuConfig[$key] = $CustomConfig[$key]
-        }
-        
-        # Initialize OpenCL
-        $clblastPath = Join-Path $PSScriptRoot "..\data\clblast.dll"
-        if (Test-Path $clblastPath) {
-            Add-Type -Path $clblastPath
-            $gpuConfig.UseOpenCL = $true
-        }
-        else {
-            Write-StatusMessage "OpenCL support not available" "Warning"
-            $gpuConfig.UseOpenCL = $false
-        }
-        
-        # Update settings
-        $settings.GPU = $gpuConfig
-        Set-Settings -Settings $settings
-        
-        Write-StatusMessage "GPU environment initialized" "Success"
-        return $true
-    }
-    catch {
-        Write-StatusMessage "Failed to initialize GPU environment: $_" "Error"
-        return $false
+        Write-Error "Failed to send prompt to LlamaBox: $_"
+        return $null
     }
 }
 
@@ -209,41 +182,33 @@ function Initialize-TextModel {
     try {
         Write-StatusMessage "Initializing text model..." "Info"
         
-        # Validate required files
+        # If already initialized and not forced reload
+        if ($global:ModelState.TextModel.Initialized -and -not $ForceReload) {
+            return $true
+        }
+        
+        # Clean up existing process if any
+        if ($global:ModelState.TextModel.Process) {
+            try { 
+                $global:ModelState.TextModel.Process.Kill()
+                $global:ModelState.TextModel.Process.Dispose()
+            }
+            catch { }
+        }
+        
+        # Initialize new model
         $modelPath = Join-Path $PSScriptRoot "..\models\Llama-3.2-3b-NSFW_Aesir_Uncensored.gguf"
+        $result = Initialize-LlamaBox -ModelPath $modelPath -Config $CustomConfig
         
-        if (-not (Test-Path $modelPath)) {
-            throw "Model file not found: $modelPath"
+        if (-not $result) {
+            throw "Failed to initialize LlamaBox"
         }
         
-        # Configure model parameters
-        $config = @{
-            Path = $modelPath
-            ContextSize = 32768
-            BatchSize = 4096
-            Temperature = 0.8
-            TopP = 0.9
-            RepeatPenalty = 1.1
-            NumThreads = -1
-            NumGPULayers = 32
-            RMSNormEps = 1e-5
-            RopeFreqBase = 10000
-            RopeFreqScale = 1.0
-        }
-        
-        # Add custom config
-        foreach ($key in $CustomConfig.Keys) {
-            $config[$key] = $CustomConfig[$key]
-        }
-        
-        # Validate model
-        if (-not (Test-GGUFModel -Path $modelPath)) {
-            throw "Invalid GGUF model file"
-        }
-        
-        # Store config globally
-        $global:ModelState.TextModel.Config = $config
+        # Update global state
+        $global:ModelState.TextModel.Process = $result.Process
+        $global:ModelState.TextModel.Config = $result.Config
         $global:ModelState.TextModel.Initialized = $true
+        $global:ModelState.TextModel.LastError = $null
         
         Write-StatusMessage "Text model initialized successfully" "Success"
         return $true
@@ -310,66 +275,74 @@ function Initialize-ImageModel {
     }
 }
 
-# Image Generation
-function New-AIImage {
+# Text Generation
+function Send-TextPrompt {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Prompt,
-        [string]$Type = "Scene",
-        [string]$OutputPath = $null,
-        [hashtable]$Options = @{}
+        [hashtable]$Options = @{},
+        [switch]$Stream
     )
     
     try {
         # Check model state
-        if (-not $global:ModelState.ImageModel.Initialized) {
-            throw "Image model not initialized"
+        if (-not $global:ModelState.TextModel.Initialized) {
+            throw "Text model not initialized"
         }
         
-        # Validate type
-        if (-not $global:ModelState.ImageModel.Config.DefaultSize.ContainsKey($Type)) {
-            throw "Invalid image type: $Type. Must be Scene, Person, or Item."
+        # Send prompt to LlamaBox
+        $result = Send-LlamaBoxPrompt -Process $global:ModelState.TextModel.Process `
+            -Prompt $Prompt -Options $Options -Stream:$Stream
+            
+        if ($null -eq $result) {
+            throw "Failed to get response from model"
         }
         
-        # Generate output path if not provided
-        if (-not $OutputPath) {
-            $hash = Get-RandomHash
-            $OutputPath = Join-Path $global:PATHS.ImagesDir "$hash.jpg"
-        }
-        
-        # Get size configuration
-        $size = $global:ModelState.ImageModel.Config.DefaultSize[$Type]
-        
-        # Prepare model parameters
-        $modelParams = @{
-            ModelPath = $global:ModelState.ImageModel.Config.Path
-            Width = $size[0]
-            Height = $size[1]
-            Steps = $global:ModelState.ImageModel.Config.Steps
-            CFGScale = $global:ModelState.ImageModel.Config.CFGScale
-            NumThreads = $global:ModelState.ImageModel.Config.NumThreads
-        }
-        
-        # Add custom options
-        foreach ($key in $Options.Keys) {
-            $modelParams[$key] = $Options[$key]
-        }
-        
-        # Generate image
-        $result = Invoke-FluxModel -Prompt $Prompt -OutputPath $OutputPath @modelParams
-        
-        if (-not $result) {
-            throw "Image generation failed"
-        }
-        
-        # Optimize generated image
-        $optimizedPath = Optimize-Image -InputPath $OutputPath
-        
-        return $optimizedPath
+        return $result
     }
     catch {
-        Write-Error "Failed to generate image: $_"
+        Write-Error "Failed to process text prompt: $_"
         return $null
+    }
+}
+
+# Token Management
+function Get-TokenCount {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Text
+    )
+    
+    try {
+        # Approximate token count based on character count
+        # This is a rough estimation: ~4 characters per token on average
+        return [math]::Ceiling($Text.Length / 4)
+    }
+    catch {
+        Write-Error "Failed to estimate token count: $_"
+        return 0
+    }
+}
+
+function Test-ContextLimit {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Text,
+        [int]$MaxTokens = 0
+    )
+    
+    try {
+        $settings = Get-Settings
+        if ($MaxTokens -eq 0) {
+            $MaxTokens = $settings.TextModel.DefaultContextSize
+        }
+        
+        $tokenCount = Get-TokenCount -Text $Text
+        return $tokenCount -le $MaxTokens
+    }
+    catch {
+        Write-Error "Failed to test context limit: $_"
+        return $false
     }
 }
 
@@ -385,8 +358,29 @@ function Test-ModelHealth {
         [string]$ModelType
     )
     
-    $state = $global:ModelState."${ModelType}Model"
-    return $state.Initialized -and -not $state.LastError
+    try {
+        $state = $global:ModelState."${ModelType}Model"
+        
+        # Basic health check
+        if (-not $state.Initialized) {
+            return $false
+        }
+        
+        # Check process health for text model
+        if ($ModelType -eq "Text" -and $state.Process) {
+            if ($state.Process.HasExited) {
+                $state.Initialized = $false
+                $state.LastError = "Process has exited"
+                return $false
+            }
+        }
+        
+        return $true
+    }
+    catch {
+        Write-Error "Failed to test model health: $_"
+        return $false
+    }
 }
 
 function Reset-ModelState {
@@ -396,13 +390,30 @@ function Reset-ModelState {
         [string]$ModelType
     )
     
-    $state = $global:ModelState."${ModelType}Model"
-    $state.Initialized = $false
-    $state.LastError = $null
-    $state.Config = $null
-    if ($state.Process) {
-        try { $state.Process.Kill() } catch { }
+    try {
+        $state = $global:ModelState."${ModelType}Model"
+        
+        # Clean up process if exists
+        if ($state.Process) {
+            try {
+                $state.Process.Kill()
+                $state.Process.Dispose()
+            }
+            catch { }
+        }
+        
+        # Reset state
+        $state.Initialized = $false
+        $state.LastError = $null
+        $state.Config = $null
         $state.Process = $null
+        $state.Handle = $null
+        
+        return $true
+    }
+    catch {
+        Write-Error "Failed to reset model state: $_"
+        return $false
     }
 }
 
