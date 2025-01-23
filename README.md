@@ -11,6 +11,14 @@ A Program that is an AI enhanced Tree Document. The user sets up the primary nod
 - the sliders for n_ctx and n_batch, are the maximum, we will alter the values relevant to the task. Additionally, a max, n_batch of 4096 and n_ctx of 131072, and only settings, n_batch 2048/4096 and n_ctx 8192/16384/32768/65536/131072, to simplify. If normally task use for example 65536, but max set to for example 32768, then it would use 32768 for the task. 
 - We would read how many characters the input text has, therein, I work out characters from tokens as `(((TOKENS/5)*4)/4)*3=CHARACTERS`, so  we would use the reverse calculation, and see what options it fits within best.
 - Export and Import from Compressed file, this will require use of built in windows zip functionality on fast compression, format would be `.lightst0ne`, and upon import then foliage would be wiped and the file being imported would then be expanded to foliage.
+- Smaller download, so we do not require the SDK...
+```
+Resource	Link	Contents
+NuGet Packages	NuGet.org	Core libraries for Avalonia UI (Desktop, Browser, Mobile).
+Project Templates	.NET CLI (dotnet new install Avalonia.Templates)	Templates for creating new Avalonia projects.
+Semi.Avalonia Theme	NuGet.org	Modern UI themes and additional controls for Avalonia.
+Nightly Builds	Avalonia NuGet Feed	Latest unstable builds with new features and bug fixes.
+```
 
 ### File Structure
 - Package Files...
